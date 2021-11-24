@@ -24,7 +24,7 @@ const (
 	upgradeLogPrefix = "upgrade from v1beta1 to v1beta2:"
 )
 
-func UpgradeFromV1beta1ToV1beta2(config *restclient.Config, namespace string, lhClient *lhclientset.Clientset) (err error) {
+func UpgradeCRFromV1beta1ToV1beta2(config *restclient.Config, namespace string, lhClient *lhclientset.Clientset) (err error) {
 	defer func() {
 		err = errors.Wrapf(err, upgradeLogPrefix+" failed")
 	}()
