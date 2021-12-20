@@ -22,6 +22,7 @@ import (
 	utilexec "k8s.io/utils/exec"
 
 	longhornclient "github.com/longhorn/longhorn-manager/client"
+	"github.com/longhorn/longhorn-manager/csi/cache"
 	"github.com/longhorn/longhorn-manager/csi/crypto"
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 	"github.com/longhorn/longhorn-manager/types"
@@ -380,6 +381,14 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	}
 
 	logrus.Debugf("volume %v device %v contains filesystem of format %v", volumeID, devicePath, diskFormat)
+
+	if volume.CacheSize != "" {
+		if err := cache.ActivateCacheDevice(volumeID, devicePath); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+		cachedDevice := cache.VolumeMapper(volumeID)
+		devicePath = cachedDevice
+	}
 
 	if volume.Encrypted {
 		secrets := req.GetSecrets()

@@ -22,6 +22,7 @@ import (
 	longhornclient "github.com/longhorn/longhorn-manager/client"
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 	"github.com/longhorn/longhorn-manager/types"
+	"github.com/longhorn/longhorn-manager/util"
 )
 
 const (
@@ -119,6 +120,14 @@ func getVolumeOptions(volOptions map[string]string) (*longhornclient.Volume, err
 			return nil, errors.Wrap(err, "Invalid parameter encrypted")
 		}
 		vol.Encrypted = isEncrypted
+	}
+
+	if cacheSize, ok := volOptions["cacheSize"]; ok {
+		size, err := util.ConvertSize(cacheSize)
+		if err != nil || size < 0 {
+			return nil, errors.Wrap(err, "Invalid parameter cacheSize")
+		}
+		vol.CacheSize = cacheSize
 	}
 
 	if numberOfReplicas, ok := volOptions["numberOfReplicas"]; ok {

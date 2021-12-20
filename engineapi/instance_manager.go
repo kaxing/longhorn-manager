@@ -89,7 +89,7 @@ func (c *InstanceManagerClient) parseProcess(p *imapi.Process) *longhorn.Instanc
 
 }
 
-func (c *InstanceManagerClient) EngineProcessCreate(engineName, volumeName, engineImage string, volumeFrontend longhorn.VolumeFrontend, replicaAddressMap map[string]string, revCounterDisabled bool, salvageRequested bool) (*longhorn.InstanceProcess, error) {
+func (c *InstanceManagerClient) EngineProcessCreate(engineName, volumeName, engineImage string, volumeFrontend longhorn.VolumeFrontend, replicaAddressMap map[string]string, revCounterDisabled bool, salvageRequested bool, dataPath string, cacheSize int64) (*longhorn.InstanceProcess, error) {
 	if err := CheckInstanceManagerCompatibilty(c.apiMinVersion, c.apiVersion); err != nil {
 		return nil, err
 	}
@@ -106,6 +106,10 @@ func (c *InstanceManagerClient) EngineProcessCreate(engineName, volumeName, engi
 	if salvageRequested {
 		args = append(args, "--salvageRequested")
 	}
+
+	args = append(args, "--cacheFile", types.GetCacheMountedDataPath(dataPath))
+
+	args = append(args, "--cacheSize", strconv.FormatInt(cacheSize, 10))
 
 	for _, addr := range replicaAddressMap {
 		args = append(args, "--replica", GetBackendReplicaURL(addr))

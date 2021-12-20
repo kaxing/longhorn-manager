@@ -22,8 +22,11 @@ import (
 type Volume struct {
 	client.Resource
 
-	Name                    string                    `json:"name"`
-	Size                    string                    `json:"size"`
+	Name string `json:"name"`
+	Size string `json:"size"`
+
+	CacheSize string `json:"cacheSize"`
+
 	Frontend                longhorn.VolumeFrontend   `json:"frontend"`
 	DisableFrontend         bool                      `json:"disableFrontend"`
 	FromBackup              string                    `json:"fromBackup"`
@@ -1067,6 +1070,7 @@ func toVolumeResource(v *longhorn.Volume, ves []*longhorn.Engine, vrs []*longhor
 		},
 		Name:                v.Name,
 		Size:                strconv.FormatInt(v.Spec.Size, 10),
+		CacheSize:           strconv.FormatInt(v.Spec.CacheSize, 10),
 		Frontend:            v.Spec.Frontend,
 		DisableFrontend:     v.Spec.DisableFrontend,
 		LastAttachedBy:      v.Spec.LastAttachedBy,

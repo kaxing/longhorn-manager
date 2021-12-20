@@ -169,6 +169,8 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 	}
 
 	size := spec.Size
+	cacheSize := spec.CacheSize
+
 	if spec.FromBackup != "" {
 		bName, bvName, _, err := backupstore.DecodeBackupURL(spec.FromBackup)
 		if err != nil {
@@ -215,6 +217,8 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 
 	// make sure it's multiples of 4096
 	size = util.RoundUpSize(size)
+
+	cacheSize = util.RoundUpSize(cacheSize)
 
 	if spec.NumberOfReplicas == 0 {
 		spec.NumberOfReplicas, err = m.getDefaultReplicaCount()
@@ -298,6 +302,7 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 		},
 		Spec: longhorn.VolumeSpec{
 			Size:                    size,
+			CacheSize:               cacheSize,
 			AccessMode:              spec.AccessMode,
 			Migratable:              spec.Migratable,
 			Encrypted:               spec.Encrypted,

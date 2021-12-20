@@ -887,12 +887,9 @@ func (imc *InstanceManagerController) createEngineManagerPodSpec(im *longhorn.In
 	}
 	podSpec.Spec.Containers[0].VolumeMounts = []v1.VolumeMount{
 		{
-			MountPath: "/host/dev",
-			Name:      "dev",
-		},
-		{
-			MountPath: "/host/proc",
-			Name:      "proc",
+			MountPath:        "/host",
+			Name:             "host",
+			MountPropagation: &hostToContainer,
 		},
 		{
 			MountPath:        types.EngineBinaryDirectoryInContainer,
@@ -902,18 +899,10 @@ func (imc *InstanceManagerController) createEngineManagerPodSpec(im *longhorn.In
 	}
 	podSpec.Spec.Volumes = []v1.Volume{
 		{
-			Name: "dev",
+			Name: "host",
 			VolumeSource: v1.VolumeSource{
 				HostPath: &v1.HostPathVolumeSource{
-					Path: "/dev",
-				},
-			},
-		},
-		{
-			Name: "proc",
-			VolumeSource: v1.VolumeSource{
-				HostPath: &v1.HostPathVolumeSource{
-					Path: "/proc",
+					Path: "/",
 				},
 			},
 		},
