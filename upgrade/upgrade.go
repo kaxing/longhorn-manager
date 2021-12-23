@@ -146,6 +146,7 @@ func doAPIVersionUpgrade(namespace string, config *restclient.Config, lhClient *
 		err = errors.Wrap(err, "upgrade API version failed")
 	}()
 
+	logrus.Infof("Debug ======> doAPIVersionUpgrade")
 	crdAPIVersion := ""
 
 	crdAPIVersionSetting, err := lhClient.LonghornV1beta2().Settings(namespace).Get(context.TODO(), string(types.SettingNameCRDAPIVersion), metav1.GetOptions{})
@@ -157,6 +158,8 @@ func doAPIVersionUpgrade(namespace string, config *restclient.Config, lhClient *
 		crdAPIVersion = crdAPIVersionSetting.Value
 	}
 
+	logrus.Infof("Debug ==========> crdAPIVersionSetting.Value = %v", crdAPIVersionSetting)
+
 	if crdAPIVersion != "" &&
 		crdAPIVersion != types.CRDAPIVersionV1beta1 &&
 		crdAPIVersion != types.CRDAPIVersionV1beta2 {
@@ -167,6 +170,8 @@ func doAPIVersionUpgrade(namespace string, config *restclient.Config, lhClient *
 		logrus.Info("No API version upgrade is needed")
 		return nil
 	}
+
+	logrus.Infof("Debug ==========> crdAPIVersion = %v", crdAPIVersion)
 
 	switch crdAPIVersion {
 	case "":

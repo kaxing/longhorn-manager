@@ -21,7 +21,6 @@ package versioned
 import (
 	"fmt"
 
-	longhornv1beta1 "github.com/longhorn/longhorn-manager/k8s/pkg/client/clientset/versioned/typed/longhorn/v1beta1"
 	longhornv1beta2 "github.com/longhorn/longhorn-manager/k8s/pkg/client/clientset/versioned/typed/longhorn/v1beta2"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
@@ -30,7 +29,6 @@ import (
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
-	LonghornV1beta1() longhornv1beta1.LonghornV1beta1Interface
 	LonghornV1beta2() longhornv1beta2.LonghornV1beta2Interface
 }
 
@@ -38,13 +36,7 @@ type Interface interface {
 // version included in a Clientset.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	longhornV1beta1 *longhornv1beta1.LonghornV1beta1Client
 	longhornV1beta2 *longhornv1beta2.LonghornV1beta2Client
-}
-
-// LonghornV1beta1 retrieves the LonghornV1beta1Client
-func (c *Clientset) LonghornV1beta1() longhornv1beta1.LonghornV1beta1Interface {
-	return c.longhornV1beta1
 }
 
 // LonghornV1beta2 retrieves the LonghornV1beta2Client
@@ -73,10 +65,6 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 	}
 	var cs Clientset
 	var err error
-	cs.longhornV1beta1, err = longhornv1beta1.NewForConfig(&configShallowCopy)
-	if err != nil {
-		return nil, err
-	}
 	cs.longhornV1beta2, err = longhornv1beta2.NewForConfig(&configShallowCopy)
 	if err != nil {
 		return nil, err
@@ -93,7 +81,6 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 // panics if there is an error in the config.
 func NewForConfigOrDie(c *rest.Config) *Clientset {
 	var cs Clientset
-	cs.longhornV1beta1 = longhornv1beta1.NewForConfigOrDie(c)
 	cs.longhornV1beta2 = longhornv1beta2.NewForConfigOrDie(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClientForConfigOrDie(c)
@@ -103,7 +90,6 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
-	cs.longhornV1beta1 = longhornv1beta1.New(c)
 	cs.longhornV1beta2 = longhornv1beta2.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
