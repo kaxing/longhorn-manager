@@ -192,9 +192,6 @@ func doAPIVersionUpgrade(namespace string, config *restclient.Config, lhClient *
 		}
 	case types.CRDAPIVersionV1beta1:
 		logrus.Infof("Upgrading from %v to %v", types.CRDAPIVersionV1beta1, types.CurrentCRDAPIVersion)
-		if err := v1beta1.UpgradeCRFromV1beta1ToV1beta2(config, namespace, lhClient); err != nil {
-			return err
-		}
 		crdAPIVersionSetting.Value = types.CRDAPIVersionV1beta2
 		if _, err := lhClient.LonghornV1beta2().Settings(namespace).Update(context.TODO(), crdAPIVersionSetting, metav1.UpdateOptions{}); err != nil {
 			return errors.Wrapf(err, "cannot finish CRD API upgrade by setting the CRDAPIVersionSetting to %v", types.CurrentCRDAPIVersion)
