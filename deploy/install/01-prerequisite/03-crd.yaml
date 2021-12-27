@@ -38,6 +38,39 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - description: The current state of the pod used to provision the backing image file from source
+      jsonPath: .status.currentState
+      name: State
+      type: string
+    - description: The data source type
+      jsonPath: .spec.sourceType
+      name: SourceType
+      type: string
+    - description: The node the backing image file will be prepared on
+      jsonPath: .spec.nodeID
+      name: Node
+      type: string
+    - description: The disk the backing image file will be prepared on
+      jsonPath: .spec.diskUUID
+      name: DiskUUID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1beta2
     schema:
       openAPIV3Schema:
@@ -129,6 +162,43 @@ spec:
     singular: backingimagemanager
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: The current state of the manager
+      jsonPath: .status.currentState
+      name: State
+      type: string
+    - description: The image the manager pod will use
+      jsonPath: .spec.image
+      name: Image
+      type: string
+    - description: The node the manager is on
+      jsonPath: .spec.nodeID
+      name: Node
+      type: string
+    - description: The disk the manager is responsible for
+      jsonPath: .spec.diskUUID
+      name: DiskUUID
+      type: string
+    - description: The disk path the manager is using
+      jsonPath: .spec.diskPath
+      name: DiskPath
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: The current state of the manager
       jsonPath: .status.currentState
@@ -262,6 +332,27 @@ spec:
     singular: backingimage
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: The backing image name
+      jsonPath: .spec.image
+      name: Image
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: The backing image name
       jsonPath: .spec.image
@@ -404,6 +495,40 @@ spec:
       jsonPath: .status.lastSyncedAt
       name: LastSyncedAt
       type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - description: The snapshot name
+      jsonPath: .status.snapshotName
+      name: SnapshotName
+      type: string
+    - description: The snapshot size
+      jsonPath: .status.size
+      name: SnapshotSize
+      type: string
+    - description: The snapshot creation time
+      jsonPath: .status.snapshotCreatedAt
+      name: SnapshotCreatedAt
+      type: string
+    - description: The backup state
+      jsonPath: .status.state
+      name: State
+      type: string
+    - description: The backup last synced time
+      jsonPath: .status.lastSyncedAt
+      name: LastSyncedAt
+      type: string
     name: v1beta2
     schema:
       openAPIV3Schema:
@@ -502,7 +627,7 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
+ status:
   acceptedNames:
     kind: ""
     plural: ""
@@ -529,6 +654,40 @@ spec:
     singular: backuptarget
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: The backup target URL
+      jsonPath: .spec.backupTargetURL
+      name: URL
+      type: string
+    - description: The backup target credential secret
+      jsonPath: .spec.credentialSecret
+      name: Credential
+      type: string
+    - description: The backup target poll interval
+      jsonPath: .spec.pollInterval
+      name: LastBackupAt
+      type: string
+    - description: Indicate whether the backup target is available or not
+      jsonPath: .status.available
+      name: Available
+      type: boolean
+    - description: The backup target last synced time
+      jsonPath: .status.lastSyncedAt
+      name: LastSyncedAt
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: The backup target URL
       jsonPath: .spec.backupTargetURL
@@ -626,7 +785,7 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
+ status:
   acceptedNames:
     kind: ""
     plural: ""
@@ -653,6 +812,36 @@ spec:
     singular: backupvolume
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: The backup volume creation time
+      jsonPath: .status.createdAt
+      name: CreatedAt
+      type: string
+    - description: The backup volume last backup name
+      jsonPath: .status.lastBackupName
+      name: LastBackupName
+      type: string
+    - description: The backup volume last backup time
+      jsonPath: .status.lastBackupAt
+      name: LastBackupAt
+      type: string
+    - description: The backup volume last synced time
+      jsonPath: .status.lastSyncedAt
+      name: LastSyncedAt
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: The backup volume creation time
       jsonPath: .status.createdAt
@@ -794,6 +983,39 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - description: State of the engine image
+      jsonPath: .status.state
+      name: State
+      type: string
+    - description: The Longhorn engine image
+      jsonPath: .spec.image
+      name: Image
+      type: string
+    - description: Number of volumes are using the engine image
+      jsonPath: .status.refCount
+      name: RefCount
+      type: integer
+    - description: The build date of the engine image
+      jsonPath: .status.buildDate
+      name: BuildDate
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1beta2
     schema:
       openAPIV3Schema:
@@ -904,6 +1126,39 @@ spec:
     singular: engine
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: The current state of the engine
+      jsonPath: .status.currentState
+      name: State
+      type: string
+    - description: The node that the engine is on
+      jsonPath: .spec.nodeID
+      name: Node
+      type: string
+    - description: The instance manager of the engine
+      jsonPath: .status.instanceManagerName
+      name: InstanceManager
+      type: string
+    - description: The current image of the engine
+      jsonPath: .status.currentImage
+      name: Image
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: The current state of the engine
       jsonPath: .status.currentState
@@ -1196,6 +1451,35 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - description: The state of the instance manager
+      jsonPath: .status.currentState
+      name: State
+      type: string
+    - description: The type of the instance manager (engine or replica)
+      jsonPath: .spec.type
+      name: Type
+      type: string
+    - description: The node that the instance manager is running on
+      jsonPath: .spec.nodeID
+      name: Node
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1beta2
     schema:
       openAPIV3Schema:
@@ -1304,6 +1588,35 @@ spec:
     singular: node
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: Indicate whether the node is ready
+      jsonPath: .status.conditions['Ready']['status']
+      name: Ready
+      type: string
+    - description: Indicate whether the user disabled/enabled replica scheduling for the node
+      jsonPath: .spec.allowScheduling
+      name: AllowScheduling
+      type: boolean
+    - description: Indicate whether Longhorn can schedule replicas on the node
+      jsonPath: .status.conditions['Schedulable']['status']
+      name: Schedulable
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: Indicate whether the node is ready
       jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -1510,6 +1823,68 @@ spec:
       jsonPath: .spec.labels
       name: Labels
       type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          metadata:
+            type: object
+            properties:
+              name:
+                type: string
+          spec:
+            type: object
+            properties:
+              groups:
+                type: array
+                items:
+                  type: string
+              task:
+                type: string
+                pattern: "^snapshot|backup$"
+              cron:
+                type: string
+              retain:
+                type: integer
+              concurrency:
+                type: integer
+              labels:
+                x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - description: Sets groupings to the jobs. When set to "default" group will be added to the volume label when no other job label exist in volume
+      jsonPath: .spec.groups
+      name: Groups
+      type: string
+    - description: Should be one of "backup" or "snapshot"
+      jsonPath: .spec.task
+      name: Task
+      type: string
+    - description: The cron expression represents recurring job scheduling
+      jsonPath: .spec.cron
+      name: Cron
+      type: string
+    - description: The number of snapshots/backups to keep for the volume
+      jsonPath: .spec.retain
+      name: Retain
+      type: integer
+    - description: The concurrent job to run by each cron job
+      jsonPath: .spec.concurrency
+      name: Concurrency
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - description: Specify the labels
+      jsonPath: .spec.labels
+      name: Labels
+      type: string
     name: v1beta2
     schema:
       openAPIV3Schema:
@@ -1596,6 +1971,43 @@ spec:
     singular: replica
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: The current state of the replica
+      jsonPath: .status.currentState
+      name: State
+      type: string
+    - description: The node that the replica is on
+      jsonPath: .spec.nodeID
+      name: Node
+      type: string
+    - description: The disk that the replica is on
+      jsonPath: .spec.diskID
+      name: Disk
+      type: string
+    - description: The instance manager of the replica
+      jsonPath: .status.instanceManagerName
+      name: InstanceManager
+      type: string
+    - description: The current image of the replica
+      jsonPath: .status.currentImage
+      name: Image
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: The current state of the replica
       jsonPath: .status.currentState
@@ -1744,6 +2156,22 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - description: The value of the setting
+      jsonPath: .value
+      name: Value
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1beta2
     schema:
       openAPIV3Schema:
@@ -1793,6 +2221,31 @@ spec:
     singular: sharemanager
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: The state of the share manager
+      jsonPath: .status.state
+      name: State
+      type: string
+    - description: The node that the share manager is owned by
+      jsonPath: .status.ownerID
+      name: Node
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: The state of the share manager
       jsonPath: .status.state
@@ -1866,6 +2319,43 @@ spec:
     singular: volume
   scope: Namespaced
   versions:
+  - additionalPrinterColumns:
+    - description: The state of the volume
+      jsonPath: .status.state
+      name: State
+      type: string
+    - description: The robustness of the volume
+      jsonPath: .status.robustness
+      name: Robustness
+      type: string
+    - description: The scheduled condition of the volume
+      jsonPath: .status.conditions['scheduled']['status']
+      name: Scheduled
+      type: string
+    - description: The size of the volume
+      jsonPath: .spec.size
+      name: Size
+      type: string
+    - description: The node that the volume is currently attaching to
+      jsonPath: .status.currentNodeID
+      name: Node
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+    served: true
+    storage: false
+    subresources:
+      status: {}
   - additionalPrinterColumns:
     - description: The state of the volume
       jsonPath: .status.state
@@ -2122,3 +2612,4 @@ status:
     plural: ""
   conditions: []
   storedVersions: []
+  
