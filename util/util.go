@@ -56,8 +56,9 @@ const (
 
 	DiskConfigFile = "longhorn-disk.cfg"
 
-	SizeAlignment     = 2 * 1024 * 1024
-	MinimalVolumeSize = 10 * 1024 * 1024
+	SizeAlignment      = 2 * 1024 * 1024
+	MinimalVolumeSize  = 10 * 1024 * 1024
+	BlockSizeAlignment = 4 * 1024
 )
 
 var (
@@ -115,6 +116,17 @@ func RoundUpSize(size int64) int64 {
 		return size
 	}
 	return size - r + SizeAlignment
+}
+
+func RoundUpCacheBlockSize(size int64) int64 {
+	if size <= 0 {
+		return BlockSizeAlignment
+	}
+	r := size % BlockSizeAlignment
+	if r == 0 {
+		return size
+	}
+	return size - r + BlockSizeAlignment
 }
 
 func Backoff(maxDuration time.Duration, timeoutMessage string, f func() (bool, error)) error {

@@ -22,11 +22,13 @@ import (
 	longhornclient "github.com/longhorn/longhorn-manager/client"
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 	"github.com/longhorn/longhorn-manager/types"
+	"github.com/longhorn/longhorn-manager/util"
 )
 
 const (
 	// defaultStaleReplicaTimeout set to 48 hours (2880 minutes)
 	defaultStaleReplicaTimeout = 2880
+	defaultCacheBlockSize      = 32768
 )
 
 // NewForcedParamsExec creates a osExecutor that allows for adding additional params to later occurring Run calls
@@ -119,6 +121,24 @@ func getVolumeOptions(volOptions map[string]string) (*longhornclient.Volume, err
 			return nil, errors.Wrap(err, "Invalid parameter encrypted")
 		}
 		vol.Encrypted = isEncrypted
+	}
+
+	if cacheSize, ok := volOptions["cacheSize"]; ok {
+		size, err := util.ConvertSize(cacheSize)
+		if err != nil || size < 0 {
+			return nil, errors.Wrap(err, "Invalid parameter cacheSize")
+		}
+		size = util.RoundUpSize(size)
+		vol.CacheSize = strconv.FormatInt(size, 10)
+	}
+
+	if cacheBlockSize, ok := volOptions["cacheBlockSize"]; ok {
+		size, err := util.ConvertSize(cacheBlockSize)
+		if err != nil || size < 0 {
+			return nil, errors.Wrap(err, "Invalid parameter cacheBlockSize")
+		}
+		size = util.RoundUpCacheBlockSize(size)
+		vol.CacheBlockSize = strconv.FormatInt(size, 10)
 	}
 
 	if numberOfReplicas, ok := volOptions["numberOfReplicas"]; ok {

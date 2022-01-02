@@ -380,7 +380,9 @@ func (ec *EngineController) CreateInstance(obj interface{}) (*longhorn.InstanceP
 	if !ok {
 		return nil, fmt.Errorf("BUG: invalid object for engine process creation: %v", obj)
 	}
-	if e.Spec.VolumeName == "" || e.Spec.NodeID == "" {
+
+	dataPath := types.GetCacheDataPath(e.Spec.DiskPath, e.Spec.VolumeName)
+	if e.Spec.VolumeName == "" || dataPath == "" || e.Spec.NodeID == "" {
 		return nil, fmt.Errorf("missing parameters for engine process creation: %v", e)
 	}
 	frontend := e.Spec.Frontend
@@ -397,7 +399,7 @@ func (ec *EngineController) CreateInstance(obj interface{}) (*longhorn.InstanceP
 		return nil, err
 	}
 
-	return c.EngineProcessCreate(e.Name, e.Spec.VolumeName, e.Spec.EngineImage, frontend, e.Status.CurrentReplicaAddressMap, e.Spec.RevisionCounterDisabled, e.Spec.SalvageRequested)
+	return c.EngineProcessCreate(e.Name, e.Spec.VolumeName, e.Spec.EngineImage, frontend, e.Status.CurrentReplicaAddressMap, e.Spec.RevisionCounterDisabled, e.Spec.SalvageRequested, dataPath, e.Spec.CacheSize)
 }
 
 func (ec *EngineController) DeleteInstance(obj interface{}) error {

@@ -793,6 +793,13 @@ func (in *DiskStatus) DeepCopyInto(out *DiskStatus) {
 			(*out)[key] = val
 		}
 	}
+	if in.ScheduledEngine != nil {
+		in, out := &in.ScheduledEngine, &out.ScheduledEngine
+		*out = make(map[string]int64, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	return
 }
 

@@ -738,13 +738,33 @@ func (nc *NodeController) syncDiskStatus(node *longhorn.Node) error {
 				}
 			}
 
+			storageScheduled := int64(0)
+
+			// sync engines
+			engines, err := nc.ds.ListEngines()
+			if err != nil {
+				return err
+			}
+			scheduledEngine := map[string]int64{}
+			for _, engine := range engines {
+				if engine.Spec.DiskPath != disk.Path {
+					engine.Spec.DiskPath = disk.Path
+					if _, err := nc.ds.UpdateEngine(engine); err != nil {
+						log.Errorf("Failed to update node & disk info for engine %v when syncing disk %v(%v), will enqueue then resync node", engine.Name, id, diskStatus.DiskUUID)
+						nc.enqueueNode(node)
+						continue
+					}
+					storageScheduled += engine.Spec.CacheSize
+					scheduledEngine[engine.Name] = engine.Spec.CacheSize
+				}
+			}
+
 			// sync replicas as well as calculate storage scheduled
 			replicas, err := nc.ds.ListReplicasByDiskUUID(diskStatus.DiskUUID)
 			if err != nil {
 				return err
 			}
 			scheduledReplica := map[string]int64{}
-			storageScheduled := int64(0)
 			for _, replica := range replicas {
 				if replica.Spec.NodeID != node.Name || replica.Spec.DiskPath != disk.Path {
 					replica.Spec.NodeID = node.Name
@@ -760,6 +780,7 @@ func (nc *NodeController) syncDiskStatus(node *longhorn.Node) error {
 			}
 			diskStatus.StorageScheduled = storageScheduled
 			diskStatus.ScheduledReplica = scheduledReplica
+			diskStatus.ScheduledEngine = scheduledEngine
 			// check disk pressure
 			info, err := nc.scheduler.GetDiskSchedulingInfo(disk, diskStatus)
 			if err != nil {
