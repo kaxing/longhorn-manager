@@ -149,6 +149,10 @@ const (
 	ImageChecksumNameLength = 8
 )
 
+const (
+	DefaultCacheBlockSize = 32768
+)
+
 type NotFoundError struct {
 	Name string
 }

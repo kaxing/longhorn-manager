@@ -181,10 +181,8 @@ func getDevSectors(devPath string) (int64, error) {
 }
 
 func getMetadataDevSectors(cacheDevSize, cacheBlockSize, sectorSize int64) int64 {
-	logrus.Infof("Debug ===> cacheDevSize = %v, cacheBlockSize=%v", cacheDevSize, cacheBlockSize)
 	metadataSize := 4194304 + (16 * cacheDevSize / cacheBlockSize)
 	metadataSectors := metadataSize / sectorSize
-	logrus.Infof("Debug ===> cacheDevSize = %v, cacheBlockSize=%v", cacheDevSize, cacheBlockSize)
 	return metadataSectors
 }
 

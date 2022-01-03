@@ -28,7 +28,6 @@ import (
 const (
 	// defaultStaleReplicaTimeout set to 48 hours (2880 minutes)
 	defaultStaleReplicaTimeout = 2880
-	defaultCacheBlockSize      = 32768
 )
 
 // NewForcedParamsExec creates a osExecutor that allows for adding additional params to later occurring Run calls
@@ -128,7 +127,10 @@ func getVolumeOptions(volOptions map[string]string) (*longhornclient.Volume, err
 		if err != nil || size < 0 {
 			return nil, errors.Wrap(err, "Invalid parameter cacheSize")
 		}
-		size = util.RoundUpSize(size)
+		if size == 0 {
+			size = types.DefaultCacheBlockSize
+		}
+		size = util.RoundUpSize(size, util.CacheSizeAlignment)
 		vol.CacheSize = strconv.FormatInt(size, 10)
 	}
 
@@ -137,7 +139,9 @@ func getVolumeOptions(volOptions map[string]string) (*longhornclient.Volume, err
 		if err != nil || size < 0 {
 			return nil, errors.Wrap(err, "Invalid parameter cacheBlockSize")
 		}
-		size = util.RoundUpCacheBlockSize(size)
+		if size > 0 {
+			size = util.RoundUpSize(size, util.CacheSizeAlignment)
+		}
 		vol.CacheBlockSize = strconv.FormatInt(size, 10)
 	}
 

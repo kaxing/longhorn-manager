@@ -83,7 +83,7 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		reqVolSizeBytes = util.MinimalVolumeSize
 	}
 	// Round up to multiple of 2 * 1024 * 1024
-	reqVolSizeBytes = util.RoundUpSize(reqVolSizeBytes)
+	reqVolSizeBytes = util.RoundUpSize(reqVolSizeBytes, util.SizeAlignment)
 
 	volumeSource := req.GetVolumeContentSource()
 	if volumeSource != nil {
@@ -636,7 +636,7 @@ func createSnapshotResponse(volumeName, backupName, snapshotTime, volumeSize str
 	}
 
 	size, _ := util.ConvertSize(volumeSize)
-	size = util.RoundUpSize(size)
+	size = util.RoundUpSize(size, util.SizeAlignment)
 	snapshotID := encodeSnapshotID(volumeName, backupName)
 	return &csi.CreateSnapshotResponse{
 		Snapshot: &csi.Snapshot{
