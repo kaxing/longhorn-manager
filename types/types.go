@@ -40,6 +40,7 @@ const (
 	EngineBinaryDirectoryInContainer = "/engine-binaries/"
 	EngineBinaryDirectoryOnHost      = "/var/lib/longhorn/engine-binaries/"
 	ReplicaHostPrefix                = "/host"
+	CacheHostPrefix                  = "/host"
 	EngineBinaryName                 = "longhorn"
 
 	BackingImageManagerDirectory = "/backing-images/"
@@ -146,6 +147,10 @@ const (
 	DefaultStaleReplicaTimeout = "2880"
 
 	ImageChecksumNameLength = 8
+)
+
+const (
+	DefaultCacheBlockSize = 32768
 )
 
 type NotFoundError struct {
@@ -455,9 +460,20 @@ func GetReplicaDataPath(diskPath, dataDirectoryName string) string {
 	return filepath.Join(diskPath, "replicas", dataDirectoryName)
 }
 
+func GetCacheDataPath(diskPath, dataDirectoryName string) string {
+	return filepath.Join(diskPath, "cache", dataDirectoryName)
+}
+
 func GetReplicaMountedDataPath(dataPath string) string {
 	if !strings.HasPrefix(dataPath, ReplicaHostPrefix) {
 		return filepath.Join(ReplicaHostPrefix, dataPath)
+	}
+	return dataPath
+}
+
+func GetCacheMountedDataPath(dataPath string) string {
+	if !strings.HasPrefix(dataPath, CacheHostPrefix) {
+		return filepath.Join(CacheHostPrefix, dataPath)
 	}
 	return dataPath
 }

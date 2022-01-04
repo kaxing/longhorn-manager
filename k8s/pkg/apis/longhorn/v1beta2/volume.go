@@ -196,6 +196,10 @@ type VolumeSpec struct {
 	NumberOfReplicas int `json:"numberOfReplicas"`
 	// +optional
 	ReplicaAutoBalance ReplicaAutoBalance `json:"replicaAutoBalance"`
+	// +optional
+	CacheSize int64 `json:"cacheSize"`
+	// +optional
+	CacheBlockSize int64 `json:"cacheBlockSize"`
 	// Deprecated. Rename to BackingImage
 	// +optional
 	BaseImage string `json:"baseImage"`

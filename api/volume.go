@@ -132,6 +132,16 @@ func (s *Server) VolumeCreate(rw http.ResponseWriter, req *http.Request) error {
 		return fmt.Errorf("fail to parse size %v", err)
 	}
 
+	cacheSize, err := util.ConvertSize(volume.CacheSize)
+	if err != nil {
+		return fmt.Errorf("fail to parse %v", err)
+	}
+
+	cacheBlockSize, err := util.ConvertSize(volume.CacheBlockSize)
+	if err != nil {
+		return fmt.Errorf("fail to parse %v", err)
+	}
+
 	// Check DiskSelector.
 	diskTags, err := s.m.GetDiskTags()
 	if err != nil {
@@ -158,6 +168,8 @@ func (s *Server) VolumeCreate(rw http.ResponseWriter, req *http.Request) error {
 
 	v, err := s.m.Create(volume.Name, &longhorn.VolumeSpec{
 		Size:                    size,
+		CacheSize:               cacheSize,
+		CacheBlockSize:          cacheBlockSize,
 		AccessMode:              volume.AccessMode,
 		Migratable:              volume.Migratable,
 		Encrypted:               volume.Encrypted,

@@ -1,8 +1,10 @@
 package util
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/longhorn/longhorn-manager/util"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConvertSize(t *testing.T) {
@@ -40,6 +42,6 @@ func TestConvertSize(t *testing.T) {
 func TestRoundUpSize(t *testing.T) {
 	assert := require.New(t)
 
-	assert.Equal(int64(SizeAlignment), RoundUpSize(0))
-	assert.Equal(int64(2*SizeAlignment), RoundUpSize(SizeAlignment+1))
+	assert.Equal(int64(SizeAlignment), RoundUpSize(0, util.SizeAlignment))
+	assert.Equal(int64(2*SizeAlignment), RoundUpSize(SizeAlignment+1, util.SizeAlignment))
 }

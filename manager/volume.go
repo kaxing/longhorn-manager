@@ -169,6 +169,9 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 	}
 
 	size := spec.Size
+	cacheSize := spec.CacheSize
+	cacheBlockSize := spec.CacheBlockSize
+
 	if spec.FromBackup != "" {
 		bName, bvName, _, err := backupstore.DecodeBackupURL(spec.FromBackup)
 		if err != nil {
@@ -214,7 +217,12 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 	}
 
 	// make sure it's multiples of 4096
-	size = util.RoundUpSize(size)
+	size = util.RoundUpSize(size, util.SizeAlignment)
+
+	cacheBlockSize = util.RoundUpSize(cacheBlockSize, util.CacheSizeAlignment)
+	if cacheSize > 0 {
+		cacheSize = util.RoundUpSize(cacheSize, util.CacheSizeAlignment)
+	}
 
 	if spec.NumberOfReplicas == 0 {
 		spec.NumberOfReplicas, err = m.getDefaultReplicaCount()
@@ -298,6 +306,8 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 		},
 		Spec: longhorn.VolumeSpec{
 			Size:                    size,
+			CacheSize:               cacheSize,
+			CacheBlockSize:          cacheBlockSize,
 			AccessMode:              spec.AccessMode,
 			Migratable:              spec.Migratable,
 			Encrypted:               spec.Encrypted,
@@ -688,7 +698,7 @@ func (m *VolumeManager) Expand(volumeName string, size int64) (v *longhorn.Volum
 		return nil, fmt.Errorf("cannot expand volume before replica scheduling success")
 	}
 
-	size = util.RoundUpSize(size)
+	size = util.RoundUpSize(size, util.SizeAlignment)
 
 	kubernetesStatus := &v.Status.KubernetesStatus
 	if kubernetesStatus.PVCName != "" && kubernetesStatus.LastPVCRefAt == "" {
@@ -776,7 +786,7 @@ func (m *VolumeManager) checkAndExpandPVC(namespace string, pvcName string, size
 
 	// all other case belong to the CSI plugin call
 	if pvcSpecValue.Cmp(requestedSize) > 0 {
-		size = util.RoundUpSize(pvcSpecValue.Value())
+		size = util.RoundUpSize(pvcSpecValue.Value(), util.SizeAlignment)
 	}
 	return false, size, nil
 }

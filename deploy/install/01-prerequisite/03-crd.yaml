@@ -1890,10 +1890,15 @@ spec:
                 type: boolean
               backupVolume:
                 type: string
+              cacheSize:
+                format: int64
+                type: integer
               desireState:
                 type: string
               disableFrontend:
                 type: boolean
+              diskPath:
+                type: string
               engineImage:
                 type: string
               frontend:
@@ -2621,6 +2626,12 @@ spec:
                       type: array
                     diskUUID:
                       type: string
+                    scheduledEngine:
+                      additionalProperties:
+                        format: int64
+                        type: integer
+                      nullable: true
+                      type: object
                     scheduledReplica:
                       additionalProperties:
                         format: int64
@@ -3638,6 +3649,9 @@ spec:
               baseImage:
                 description: Deprecated. Rename to BackingImage
                 type: string
+              cacheSize:
+                format: int64
+                type: integer
               dataLocality:
                 enum:
                 - disabled

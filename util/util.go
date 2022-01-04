@@ -39,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 	clientset "k8s.io/client-go/kubernetes"
 
+	"github.com/longhorn/backing-image-manager/pkg/types"
 	iscsi_util "github.com/longhorn/go-iscsi-helper/util"
 )
 
@@ -56,8 +57,9 @@ const (
 
 	DiskConfigFile = "longhorn-disk.cfg"
 
-	SizeAlignment     = 2 * 1024 * 1024
-	MinimalVolumeSize = 10 * 1024 * 1024
+	SizeAlignment      = 2 * 1024 * 1024
+	MinimalVolumeSize  = 10 * 1024 * 1024
+	CacheSizeAlignment = types.DefaultSectorSize
 )
 
 var (
@@ -106,15 +108,15 @@ func ConvertSize(size interface{}) (int64, error) {
 	return 0, errors.Errorf("could not parse size '%v'", size)
 }
 
-func RoundUpSize(size int64) int64 {
+func RoundUpSize(size int64, alignment int64) int64 {
 	if size <= 0 {
-		return SizeAlignment
+		return alignment
 	}
-	r := size % SizeAlignment
+	r := size % alignment
 	if r == 0 {
 		return size
 	}
-	return size - r + SizeAlignment
+	return size - r + alignment
 }
 
 func Backoff(maxDuration time.Duration, timeoutMessage string, f func() (bool, error)) error {

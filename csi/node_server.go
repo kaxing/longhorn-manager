@@ -22,6 +22,7 @@ import (
 	utilexec "k8s.io/utils/exec"
 
 	longhornclient "github.com/longhorn/longhorn-manager/client"
+	"github.com/longhorn/longhorn-manager/csi/cache"
 	"github.com/longhorn/longhorn-manager/csi/crypto"
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 	"github.com/longhorn/longhorn-manager/types"
@@ -379,7 +380,19 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return nil, status.Errorf(codes.Internal, "failed to evaluate device filesystem format")
 	}
 
-	logrus.Debugf("volume %v device %v contains filesystem of format %v", volumeID, devicePath, diskFormat)
+	logrus.Infof("volume %v device %v contains filesystem of format %v", volumeID, devicePath, diskFormat)
+
+	if volume.CacheSize != "0" {
+		cacheBlockSize, err := strconv.ParseInt(volume.CacheBlockSize, 10, 64)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to parse cache block size")
+		}
+		if err := cache.ActivateCacheDevice(volumeID, devicePath, cacheBlockSize); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+		cachedDevice := cache.VolumeMapper(volumeID)
+		devicePath = cachedDevice
+	}
 
 	if volume.Encrypted {
 		secrets := req.GetSecrets()
@@ -478,6 +491,12 @@ func (ns *NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 			}
 			logrus.Infof("NodeUnstageVolume: volume %s closed active crypto device %s", volumeID, cryptoDevice)
 		}
+	}
+
+	cacheDevice := cache.VolumeMapper(volumeID)
+	logrus.Infof("NodeUnstageVolume: deavtivate cache device %v", cacheDevice)
+	if err := cache.DeactivateCacheDevice(volumeID); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	logrus.Infof("NodeUnstageVolume: volume %s unmounted from node path %s", volumeID, targetPath)
