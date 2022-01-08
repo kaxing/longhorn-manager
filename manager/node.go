@@ -178,6 +178,40 @@ func (m *VolumeManager) DiskUpdate(name string, updateDisks map[string]longhorn.
 	return node, nil
 }
 
+func (m *VolumeManager) CacheDiskUpdate(name string, updateCacheDisks map[string]longhorn.CacheDiskSpec) (*longhorn.Node, error) {
+	node, err := m.ds.GetNode(name)
+	if err != nil {
+		return nil, err
+	}
+
+	originCacheDisks := node.Spec.CacheDisks
+
+	for name, uDisk := range updateCacheDisks {
+		if uDisk.StorageReserved < 0 {
+			return nil, fmt.Errorf("update cacheDisk on node %v error: The storageReserved setting of cacheDisk %v(%v) is not valid, should be positive and no more than storageMaximum and storageAvailable", name, name, uDisk.Path)
+		}
+
+		updateCacheDisks[name] = uDisk
+	}
+
+	// delete cacheDisks
+	for name, _ := range originCacheDisks {
+		if _, ok := updateCacheDisks[name]; !ok {
+			if node.Status.CacheDiskStatus[name].StorageScheduled != 0 {
+				return nil, fmt.Errorf("Delete cacheDisk on node %v error: Please remove all caches first ", name)
+			}
+		}
+	}
+	node.Spec.CacheDisks = updateCacheDisks
+
+	node, err = m.ds.UpdateNode(node)
+	if err != nil {
+		return nil, err
+	}
+	logrus.Debugf("Updated node cacheDisks of %v to %+v", name, node.Spec.CacheDisks)
+	return node, nil
+}
+
 func (m *VolumeManager) DeleteNode(name string) error {
 	node, err := m.ds.GetNode(name)
 	if err != nil {

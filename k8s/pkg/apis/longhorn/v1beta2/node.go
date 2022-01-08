@@ -25,10 +25,11 @@ const (
 )
 
 const (
-	DiskConditionReasonDiskPressure          = "DiskPressure"
-	DiskConditionReasonDiskFilesystemChanged = "DiskFilesystemChanged"
-	DiskConditionReasonNoDiskInfo            = "NoDiskInfo"
-	DiskConditionReasonDiskNotReady          = "DiskNotReady"
+	DiskConditionReasonDiskPressure             = "DiskPressure"
+	DiskConditionReasonDiskFilesystemChanged    = "DiskFilesystemChanged"
+	DiskConditionReasonNoDiskInfo               = "NoDiskInfo"
+	DiskConditionReasonDiskNotReady             = "DiskNotReady"
+	DiskConditionReasonDiskFilesystemConflicted = "DiskFilesystemConflicted"
 )
 
 type DiskSpec struct {
@@ -61,12 +62,35 @@ type DiskStatus struct {
 	DiskUUID string `json:"diskUUID"`
 }
 
+type CacheDiskSpec struct {
+	// +optional
+	Path string `json:"path"`
+	// +optional
+	StorageReserved int64 `json:"storageReserved"`
+}
+
+type CacheDiskStatus struct {
+	// +optional
+	// +nullable
+	Conditions []Condition `json:"conditions"`
+	// +optional
+	StorageAvailable int64 `json:"storageAvailable"`
+	// +optional
+	StorageScheduled int64 `json:"storageScheduled"`
+	// +optional
+	StorageMaximum int64 `json:"storageMaximum"`
+	// +optional
+	DiskUUID string `json:"diskUUID"`
+}
+
 // NodeSpec defines the desired state of the Longhorn node
 type NodeSpec struct {
 	// +optional
 	Name string `json:"name"`
 	// +optional
 	Disks map[string]DiskSpec `json:"disks"`
+	// +optional
+	CacheDisks map[string]CacheDiskSpec `json:"cacheDisks"`
 	// +optional
 	AllowScheduling bool `json:"allowScheduling"`
 	// +optional
@@ -89,6 +113,9 @@ type NodeStatus struct {
 	// +optional
 	// +nullable
 	DiskStatus map[string]*DiskStatus `json:"diskStatus"`
+	// +optional
+	// +nullable
+	CacheDiskStatus map[string]*CacheDiskStatus `json:"cacheDiskStatus"`
 	// +optional
 	Region string `json:"region"`
 	// +optional

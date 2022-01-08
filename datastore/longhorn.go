@@ -1832,6 +1832,7 @@ func (s *DataStore) CreateDefaultNode(name string) (*longhorn.Node, error) {
 			return nil, err
 		}
 		node.Spec.Disks = disks
+		node.Spec.CacheDisks = make(map[string]longhorn.CacheDiskSpec, 0)
 	}
 
 	return s.CreateNode(node)

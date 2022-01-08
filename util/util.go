@@ -39,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/version"
 	clientset "k8s.io/client-go/kubernetes"
 
+	"github.com/longhorn/backing-image-manager/pkg/types"
 	iscsi_util "github.com/longhorn/go-iscsi-helper/util"
 )
 
@@ -49,6 +50,7 @@ const (
 
 	HostProcPath                 = "/host/proc"
 	ReplicaDirectory             = "/replicas/"
+	CacheDirectory               = "/cache/"
 	DeviceDirectory              = "/dev/longhorn/"
 	TemporaryMountPointDirectory = "/tmp/mnt/"
 
@@ -56,8 +58,9 @@ const (
 
 	DiskConfigFile = "longhorn-disk.cfg"
 
-	SizeAlignment     = 2 * 1024 * 1024
-	MinimalVolumeSize = 10 * 1024 * 1024
+	SizeAlignment      = 2 * 1024 * 1024
+	MinimalVolumeSize  = 10 * 1024 * 1024
+	CacheSizeAlignment = types.DefaultSectorSize
 )
 
 var (
@@ -106,15 +109,15 @@ func ConvertSize(size interface{}) (int64, error) {
 	return 0, errors.Errorf("could not parse size '%v'", size)
 }
 
-func RoundUpSize(size int64) int64 {
+func RoundUpSize(size int64, alignment int64) int64 {
 	if size <= 0 {
-		return SizeAlignment
+		return alignment
 	}
-	r := size % SizeAlignment
+	r := size % alignment
 	if r == 0 {
 		return size
 	}
-	return size - r + SizeAlignment
+	return size - r + alignment
 }
 
 func Backoff(maxDuration time.Duration, timeoutMessage string, f func() (bool, error)) error {
@@ -614,6 +617,19 @@ func CreateDiskPathReplicaSubdirectory(path string) error {
 	return nil
 }
 
+func CreateDiskPathCacheSubdirectory(path string) error {
+	nsPath := iscsi_util.GetHostNamespacePath(HostProcPath)
+	nsExec, err := iscsi_util.NewNamespaceExecutor(nsPath)
+	if err != nil {
+		return err
+	}
+	if _, err := nsExec.Execute("mkdir", []string{"-p", filepath.Join(path, CacheDirectory)}); err != nil {
+		return errors.Wrapf(err, "error creating cache path %v on host", path)
+	}
+
+	return nil
+}
+
 func DeleteDiskPathReplicaSubdirectoryAndDiskCfgFile(
 	nsExec *iscsi_util.NamespaceExecutor, path string) error {
 
@@ -622,6 +638,30 @@ func DeleteDiskPathReplicaSubdirectoryAndDiskCfgFile(
 	filePath := filepath.Join(path, DiskConfigFile)
 
 	// Check if the replica directory exist, delete it
+	if _, err := nsExec.Execute("ls", []string{dirPath}); err == nil {
+		if _, err := nsExec.Execute("rmdir", []string{dirPath}); err != nil {
+			return errors.Wrapf(err, "error deleting data path %v on host", path)
+		}
+	}
+
+	// Check if the disk cfg file exist, delete it
+	if _, err := nsExec.Execute("ls", []string{filePath}); err == nil {
+		if _, err := nsExec.Execute("rm", []string{filePath}); err != nil {
+			err = errors.Wrapf(err, "error deleting disk cfg file %v on host", filePath)
+		}
+	}
+
+	return err
+}
+
+func DeleteDiskPathCacheSubdirectoryAndDiskCfgFile(
+	nsExec *iscsi_util.NamespaceExecutor, path string) error {
+
+	var err error
+	dirPath := filepath.Join(path, CacheDirectory)
+	filePath := filepath.Join(path, DiskConfigFile)
+
+	// Check if the cache directory exist, delete it
 	if _, err := nsExec.Execute("ls", []string{dirPath}); err == nil {
 		if _, err := nsExec.Execute("rmdir", []string{dirPath}); err != nil {
 			return errors.Wrapf(err, "error deleting data path %v on host", path)
@@ -763,6 +803,47 @@ func GenerateDiskConfig(path string) (*DiskConfig, error) {
 		return nil, fmt.Errorf("cannot write to disk cfg on %v: %v", filePath, err)
 	}
 	if err := CreateDiskPathReplicaSubdirectory(path); err != nil {
+		return nil, err
+	}
+	if _, err := nsExec.Execute("sync", []string{filePath}); err != nil {
+		return nil, fmt.Errorf("cannot sync disk cfg on %v: %v", filePath, err)
+	}
+
+	return cfg, nil
+}
+
+func GenerateCacheDiskConfig(path string) (*DiskConfig, error) {
+	cfg := &DiskConfig{
+		DiskUUID: UUID(),
+	}
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("BUG: Cannot marshal %+v: %v", cfg, err)
+	}
+
+	nsPath := iscsi_util.GetHostNamespacePath(HostProcPath)
+	nsExec, err := iscsi_util.NewNamespaceExecutor(nsPath)
+	if err != nil {
+		return nil, err
+	}
+	filePath := filepath.Join(path, DiskConfigFile)
+	if _, err := nsExec.Execute("ls", []string{filePath}); err == nil {
+		return nil, fmt.Errorf("disk cfg on %v exists, cannot override", filePath)
+	}
+
+	defer func() {
+		if err != nil {
+			if derr := DeleteDiskPathCacheSubdirectoryAndDiskCfgFile(nsExec, path); derr != nil {
+				err = errors.Wrapf(err, "cleaning up disk config path %v failed with error: %v", path, derr)
+			}
+
+		}
+	}()
+
+	if _, err := nsExec.ExecuteWithStdin("dd", []string{"of=" + filePath}, string(encoded)); err != nil {
+		return nil, fmt.Errorf("cannot write to disk cfg on %v: %v", filePath, err)
+	}
+	if err := CreateDiskPathCacheSubdirectory(path); err != nil {
 		return nil, err
 	}
 	if _, err := nsExec.Execute("sync", []string{filePath}); err != nil {

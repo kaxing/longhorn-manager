@@ -22,8 +22,12 @@ import (
 type Volume struct {
 	client.Resource
 
-	Name                    string                    `json:"name"`
-	Size                    string                    `json:"size"`
+	Name string `json:"name"`
+	Size string `json:"size"`
+
+	CacheSize      string `json:"cacheSize"`
+	CacheBlockSize string `json:"cacheBlockSize"`
+
 	Frontend                longhorn.VolumeFrontend   `json:"frontend"`
 	DisableFrontend         bool                      `json:"disableFrontend"`
 	FromBackup              string                    `json:"fromBackup"`
@@ -258,6 +262,7 @@ type Node struct {
 	AllowScheduling          bool                          `json:"allowScheduling"`
 	EvictionRequested        bool                          `json:"evictionRequested"`
 	Disks                    map[string]DiskInfo           `json:"disks"`
+	CacheDisks               map[string]CacheDiskInfo      `json:"cacheDisks"`
 	Conditions               map[string]longhorn.Condition `json:"conditions"`
 	Tags                     []string                      `json:"tags"`
 	Region                   string                        `json:"region"`
@@ -286,6 +291,24 @@ type DiskUpdateInput struct {
 	Disks map[string]longhorn.DiskSpec `json:"disks"`
 }
 
+type CacheDiskStatus struct {
+	Conditions       map[string]longhorn.Condition `json:"conditions"`
+	StorageAvailable int64                         `json:"storageAvailable"`
+	StorageScheduled int64                         `json:"storageScheduled"`
+	StorageMaximum   int64                         `json:"storageMaximum"`
+	DiskUUID         string                        `json:"diskUUID"`
+}
+
+type CacheDiskInfo struct {
+	longhorn.CacheDiskSpec
+	// To convert CR status.Conditions from datatype map to slice, replace longhorn.DiskStatus with DiskStatus to keep it use datatype map.
+	// Therefore, the UI (RESTful endpoint) does not need to do any changes.
+	CacheDiskStatus
+}
+
+type CacheDiskUpdateInput struct {
+	Disks map[string]longhorn.CacheDiskSpec `json:"cacheDisks"`
+}
 type Event struct {
 	client.Resource
 	Event     v1.Event `json:"event"`
@@ -413,6 +436,7 @@ func NewSchema() *client.Schemas {
 	schemas.AddType("replica", Replica{})
 	schemas.AddType("controller", Controller{})
 	schemas.AddType("diskUpdate", longhorn.DiskSpec{})
+	schemas.AddType("cacheDiskUpdate", longhorn.CacheDiskSpec{})
 	schemas.AddType("UpdateReplicaCountInput", UpdateReplicaCountInput{})
 	schemas.AddType("UpdateReplicaAutoBalanceInput", UpdateReplicaAutoBalanceInput{})
 	schemas.AddType("UpdateDataLocalityInput", UpdateDataLocalityInput{})
@@ -454,6 +478,8 @@ func NewSchema() *client.Schemas {
 	nodeSchema(schemas.AddType("node", Node{}))
 	diskSchema(schemas.AddType("diskUpdateInput", DiskUpdateInput{}))
 	diskInfoSchema(schemas.AddType("diskInfo", DiskInfo{}))
+	cacheDiskSchema(schemas.AddType("cacheDiskUpdateInput", CacheDiskUpdateInput{}))
+	cacheDiskInfoSchema(schemas.AddType("cacheDiskInfo", CacheDiskInfo{}))
 	kubernetesStatusSchema(schemas.AddType("kubernetesStatus", longhorn.KubernetesStatus{}))
 	backupListOutputSchema(schemas.AddType("backupListOutput", BackupListOutput{}))
 	snapshotListOutputSchema(schemas.AddType("snapshotListOutput", SnapshotListOutput{}))
@@ -519,6 +545,18 @@ func diskInfoSchema(diskInfo *client.Schema) {
 	conditions := diskInfo.ResourceFields["conditions"]
 	conditions.Type = "map[diskCondition]"
 	diskInfo.ResourceFields["conditions"] = conditions
+}
+
+func cacheDiskSchema(cacheDiskUpdateInput *client.Schema) {
+	cacheDisks := cacheDiskUpdateInput.ResourceFields["cacheDisks"]
+	cacheDisks.Type = "array[cacheDiskUpdate]"
+	cacheDiskUpdateInput.ResourceFields["disks"] = cacheDisks
+}
+
+func cacheDiskInfoSchema(cacheDiskInfo *client.Schema) {
+	conditions := cacheDiskInfo.ResourceFields["conditions"]
+	conditions.Type = "map[cacheDiskCondition]"
+	cacheDiskInfo.ResourceFields["conditions"] = conditions
 }
 
 func engineImageSchema(engineImage *client.Schema) {
@@ -1067,8 +1105,11 @@ func toVolumeResource(v *longhorn.Volume, ves []*longhorn.Engine, vrs []*longhor
 			Actions: map[string]string{},
 			Links:   map[string]string{},
 		},
-		Name:                v.Name,
-		Size:                strconv.FormatInt(v.Spec.Size, 10),
+		Name:           v.Name,
+		Size:           strconv.FormatInt(v.Spec.Size, 10),
+		CacheSize:      strconv.FormatInt(v.Spec.CacheSize, 10),
+		CacheBlockSize: strconv.FormatInt(v.Spec.CacheBlockSize, 10),
+
 		Frontend:            v.Spec.Frontend,
 		DisableFrontend:     v.Spec.DisableFrontend,
 		LastAttachedBy:      v.Spec.LastAttachedBy,
@@ -1472,8 +1513,27 @@ func toNodeResource(node *longhorn.Node, address string, apiContext *api.ApiCont
 	}
 	n.Disks = disks
 
+	cacheDisks := map[string]CacheDiskInfo{}
+	for name, disk := range node.Spec.CacheDisks {
+		di := CacheDiskInfo{
+			CacheDiskSpec: disk,
+		}
+		if node.Status.CacheDiskStatus != nil && node.Status.CacheDiskStatus[name] != nil {
+			di.CacheDiskStatus = CacheDiskStatus{
+				Conditions:       sliceToMap(node.Status.DiskStatus[name].Conditions),
+				StorageAvailable: node.Status.DiskStatus[name].StorageAvailable,
+				StorageScheduled: node.Status.DiskStatus[name].StorageScheduled,
+				StorageMaximum:   node.Status.DiskStatus[name].StorageMaximum,
+				DiskUUID:         node.Status.DiskStatus[name].DiskUUID,
+			}
+		}
+		cacheDisks[name] = di
+	}
+	n.CacheDisks = cacheDisks
+
 	n.Actions = map[string]string{
-		"diskUpdate": apiContext.UrlBuilder.ActionLink(n.Resource, "diskUpdate"),
+		"diskUpdate":      apiContext.UrlBuilder.ActionLink(n.Resource, "diskUpdate"),
+		"cacheDiskUpdate": apiContext.UrlBuilder.ActionLink(n.Resource, "cacheDiskUpdate"),
 	}
 
 	return n

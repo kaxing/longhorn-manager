@@ -135,6 +135,34 @@ func (s *Server) DiskUpdate(rw http.ResponseWriter, req *http.Request) error {
 	return nil
 }
 
+func (s *Server) CacheDiskUpdate(rw http.ResponseWriter, req *http.Request) error {
+	var cacheDiskUpdate CacheDiskUpdateInput
+	apiContext := api.GetApiContext(req)
+	if err := apiContext.Read(&cacheDiskUpdate); err != nil {
+		return err
+	}
+
+	id := mux.Vars(req)["name"]
+
+	nodeIPMap, err := s.m.GetManagerNodeIPMap()
+	if err != nil {
+		return errors.Wrap(err, "fail to get node ip")
+	}
+
+	obj, err := util.RetryOnConflictCause(func() (interface{}, error) {
+		return s.m.CacheDiskUpdate(id, cacheDiskUpdate.Disks)
+	})
+	if err != nil {
+		return err
+	}
+	unode, ok := obj.(*longhorn.Node)
+	if !ok {
+		return fmt.Errorf("BUG: cannot convert to node %v object", id)
+	}
+	apiContext.Write(toNodeResource(unode, nodeIPMap[id], apiContext))
+	return nil
+}
+
 func (s *Server) NodeDelete(rw http.ResponseWriter, req *http.Request) error {
 	id := mux.Vars(req)["name"]
 	if err := s.m.DeleteNode(id); err != nil {

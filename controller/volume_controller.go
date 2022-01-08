@@ -2692,6 +2692,8 @@ func (vc *VolumeController) createEngine(v *longhorn.Volume, isNewEngine bool) (
 			ReplicaAddressMap:         map[string]string{},
 			UpgradedReplicaAddressMap: map[string]string{},
 			RevisionCounterDisabled:   v.Spec.RevisionCounterDisabled,
+			CacheSize:                 v.Spec.CacheSize,
+			CacheBlockSize:            v.Spec.CacheBlockSize,
 		},
 	}
 

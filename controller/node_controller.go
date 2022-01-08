@@ -41,10 +41,11 @@ type NodeController struct {
 
 	cacheSyncs []cache.InformerSynced
 
-	getDiskInfoHandler    GetDiskInfoHandler
-	topologyLabelsChecker TopologyLabelsChecker
-	getDiskConfig         GetDiskConfig
-	generateDiskConfig    GenerateDiskConfig
+	getDiskInfoHandler      GetDiskInfoHandler
+	topologyLabelsChecker   TopologyLabelsChecker
+	getDiskConfig           GetDiskConfig
+	generateDiskConfig      GenerateDiskConfig
+	generateCacheDiskConfig GenerateCacheDiskConfig
 
 	scheduler *scheduler.ReplicaScheduler
 }
@@ -54,6 +55,7 @@ type TopologyLabelsChecker func(kubeClient clientset.Interface, vers string) (bo
 
 type GetDiskConfig func(string) (*util.DiskConfig, error)
 type GenerateDiskConfig func(string) (*util.DiskConfig, error)
+type GenerateCacheDiskConfig func(string) (*util.DiskConfig, error)
 
 func NewNodeController(
 	logger logrus.FieldLogger,
@@ -78,10 +80,11 @@ func NewNodeController(
 
 		ds: ds,
 
-		getDiskInfoHandler:    util.GetDiskInfo,
-		topologyLabelsChecker: util.IsKubernetesVersionAtLeast,
-		getDiskConfig:         util.GetDiskConfig,
-		generateDiskConfig:    util.GenerateDiskConfig,
+		getDiskInfoHandler:      util.GetDiskInfo,
+		topologyLabelsChecker:   util.IsKubernetesVersionAtLeast,
+		getDiskConfig:           util.GetDiskConfig,
+		generateDiskConfig:      util.GenerateDiskConfig,
+		generateCacheDiskConfig: util.GenerateCacheDiskConfig,
 	}
 
 	nc.scheduler = scheduler.NewReplicaScheduler(ds)
@@ -426,6 +429,10 @@ func (nc *NodeController) syncNode(key string) (err error) {
 	if err := nc.syncDiskStatus(node); err != nil {
 		return err
 	}
+	// sync cacheDisks status on current node
+	if err := nc.syncCacheDiskStatus(node); err != nil {
+		return err
+	}
 	// sync mount propagation status on current node
 	for _, pod := range managerPods {
 		if pod.Spec.NodeName == node.Name {
@@ -551,6 +558,18 @@ func (nc *NodeController) getDiskInfoMap(node *longhorn.Node) map[string]*diskIn
 	return result
 }
 
+func (nc *NodeController) getCacheDiskInfoMap(node *longhorn.Node) map[string]*diskInfo {
+	result := map[string]*diskInfo{}
+	for id, disk := range node.Spec.CacheDisks {
+		info, err := nc.getDiskInfoHandler(disk.Path)
+		result[id] = &diskInfo{
+			entry: info,
+			err:   err,
+		}
+	}
+	return result
+}
+
 // Check all disks in the same filesystem ID are in ready status
 func (nc *NodeController) isFSIDDuplicatedWithExistingReadyDisk(name string, disks []string, diskStatusMap map[string]*longhorn.DiskStatus) bool {
 	if len(disks) > 1 {
@@ -564,6 +583,16 @@ func (nc *NodeController) isFSIDDuplicatedWithExistingReadyDisk(name string, dis
 				longhorn.ConditionStatusTrue) {
 				return true
 			}
+		}
+	}
+
+	return false
+}
+
+func (nc *NodeController) isFSIDExistInExistingDisks(fsid string, diskInfoMap map[string]*diskInfo) bool {
+	for _, info := range diskInfoMap {
+		if fsid == info.entry.Fsid {
+			return true
 		}
 	}
 
@@ -781,6 +810,174 @@ func (nc *NodeController) syncDiskStatus(node *longhorn.Node) error {
 		}
 
 		diskStatusMap[id] = diskStatus
+	}
+
+	return nil
+}
+
+func (nc *NodeController) syncCacheDiskStatus(node *longhorn.Node) error {
+	log := getLoggerForNode(nc.logger, node)
+
+	// sync the cacheDisks between node.Spec.CacheDisks and node.Status.CacheDiskStatus
+	if node.Status.CacheDiskStatus == nil {
+		node.Status.CacheDiskStatus = map[string]*longhorn.CacheDiskStatus{}
+	}
+	for id := range node.Spec.CacheDisks {
+		if node.Status.CacheDiskStatus[id] == nil {
+			node.Status.CacheDiskStatus[id] = &longhorn.CacheDiskStatus{}
+		}
+		cacheDiskStatus := node.Status.CacheDiskStatus[id]
+		if cacheDiskStatus.Conditions == nil {
+			cacheDiskStatus.Conditions = []longhorn.Condition{}
+		}
+
+		// when condition are not ready, the old storage data should be cleaned
+		cacheDiskStatus.StorageMaximum = 0
+		cacheDiskStatus.StorageAvailable = 0
+		node.Status.CacheDiskStatus[id] = cacheDiskStatus
+	}
+	for id := range node.Status.CacheDiskStatus {
+		if _, exists := node.Spec.CacheDisks[id]; !exists {
+			delete(node.Status.CacheDiskStatus, id)
+		}
+	}
+
+	diskInfoMap := nc.getDiskInfoMap(node)
+
+	cacheDiskStatusMap := node.Status.CacheDiskStatus
+	cacheDiskInfoMap := nc.getCacheDiskInfoMap(node)
+
+	// update Ready condition
+	fsid2Disks := map[string][]string{}
+	for id, info := range cacheDiskInfoMap {
+		if info.err != nil {
+			cacheDiskStatusMap[id].Conditions = types.SetConditionAndRecord(cacheDiskStatusMap[id].Conditions,
+				longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+				string(longhorn.DiskConditionReasonNoDiskInfo),
+				fmt.Sprintf("Cache disk %v(%v) on node %v is not ready: Get disk information error: %v", id, node.Spec.CacheDisks[id].Path, node.Name, info.err),
+				nc.eventRecorder, node, v1.EventTypeWarning)
+		} else {
+			if fsid2Disks[info.entry.Fsid] == nil {
+				fsid2Disks[info.entry.Fsid] = []string{}
+			}
+			fsid2Disks[info.entry.Fsid] = append(fsid2Disks[info.entry.Fsid], id)
+		}
+	}
+
+	for fsid, disks := range fsid2Disks {
+		for _, id := range disks {
+			cacheDiskStatus := cacheDiskStatusMap[id]
+			cacheDisk := node.Spec.CacheDisks[id]
+			cacheDiskUUID := ""
+			cacheDiskConfig, err := nc.getDiskConfig(node.Spec.CacheDisks[id].Path)
+			if err != nil {
+				if !types.ErrorIsNotFound(err) {
+					cacheDiskStatusMap[id].Conditions = types.SetConditionAndRecord(cacheDiskStatusMap[id].Conditions,
+						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+						string(longhorn.DiskConditionReasonNoDiskInfo),
+						fmt.Sprintf("Disk %v(%v) on node %v is not ready: failed to get disk config: error: %v", id, cacheDisk.Path, node.Name, err),
+						nc.eventRecorder, node, v1.EventTypeWarning)
+					continue
+				}
+			} else {
+				cacheDiskUUID = cacheDiskConfig.DiskUUID
+			}
+
+			if cacheDiskStatusMap[id].DiskUUID == "" {
+				if nc.isFSIDExistInExistingDisks(fsid, diskInfoMap) {
+					// Found multiple disks in the same Fsid
+					cacheDiskStatusMap[id].Conditions =
+						types.SetConditionAndRecord(
+							cacheDiskStatusMap[id].Conditions,
+							longhorn.DiskConditionTypeReady,
+							longhorn.ConditionStatusFalse,
+							string(longhorn.DiskConditionReasonDiskFilesystemConflicted),
+							fmt.Sprintf("Cache disk %v(%v) on node %v is not ready: cache disk has same file system ID %v as other data disks %+v", id, cacheDisk.Path, node.Name, fsid, disks),
+							nc.eventRecorder, node,
+							v1.EventTypeWarning)
+					continue
+				}
+
+				if cacheDiskUUID == "" {
+					cacheDiskConfig, err := nc.generateCacheDiskConfig(node.Spec.CacheDisks[id].Path)
+					if err != nil {
+						cacheDiskStatusMap[id].Conditions = types.SetConditionAndRecord(cacheDiskStatusMap[id].Conditions,
+							longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+							string(longhorn.DiskConditionReasonNoDiskInfo),
+							fmt.Sprintf("Cache disk %v(%v) on node %v is not ready: failed to generate cache disk config: error: %v", id, cacheDisk.Path, node.Name, err),
+							nc.eventRecorder, node, v1.EventTypeWarning)
+						continue
+					}
+					cacheDiskUUID = cacheDiskConfig.DiskUUID
+				}
+
+				cacheDiskStatus.DiskUUID = cacheDiskUUID
+			} else { // diskStatusMap[id].DiskUUID != ""
+				if cacheDiskUUID == "" {
+					cacheDiskStatusMap[id].Conditions = types.SetConditionAndRecord(cacheDiskStatusMap[id].Conditions,
+						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
+						fmt.Sprintf("Cache disk %v(%v) on node %v is not ready: cannot find cache disk config file, maybe due to a mount error", id, cacheDisk.Path, node.Name),
+						nc.eventRecorder, node, v1.EventTypeWarning)
+				} else if cacheDiskStatusMap[id].DiskUUID != cacheDiskUUID {
+					cacheDiskStatusMap[id].Conditions = types.SetConditionAndRecord(cacheDiskStatusMap[id].Conditions,
+						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
+						fmt.Sprintf("Cache disk %v(%v) on node %v is not ready: record diskUUID doesn't match the one on the cache disk ", id, cacheDisk.Path, node.Name),
+						nc.eventRecorder, node, v1.EventTypeWarning)
+				}
+			}
+			if cacheDiskStatus.DiskUUID == cacheDiskUUID {
+				// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
+				// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
+				const truncateTo = 100 * 1024 * 1024
+				usableStorage := (cacheDiskInfoMap[id].entry.StorageAvailable / truncateTo) * truncateTo
+				cacheDiskStatus.StorageAvailable = usableStorage
+				cacheDiskStatus.StorageMaximum = cacheDiskInfoMap[id].entry.StorageMaximum
+				cacheDiskStatusMap[id].Conditions = types.SetConditionAndRecord(cacheDiskStatusMap[id].Conditions,
+					longhorn.DiskConditionTypeReady, longhorn.ConditionStatusTrue,
+					"", fmt.Sprintf("Cache disk %v(%v) on node %v is ready", id, cacheDisk.Path, node.Name),
+					nc.eventRecorder, node, v1.EventTypeNormal)
+			}
+			cacheDiskStatusMap[id] = cacheDiskStatus
+		}
+
+	}
+
+	// update Schedulable condition
+	for id, disk := range node.Spec.CacheDisks {
+		cacheDiskStatus := cacheDiskStatusMap[id]
+
+		if types.GetCondition(cacheDiskStatus.Conditions, longhorn.DiskConditionTypeReady).Status != longhorn.ConditionStatusTrue {
+			cacheDiskStatus.StorageScheduled = 0
+			cacheDiskStatus.Conditions = types.SetConditionAndRecord(cacheDiskStatus.Conditions,
+				longhorn.DiskConditionTypeSchedulable, longhorn.ConditionStatusFalse,
+				string(longhorn.DiskConditionReasonDiskNotReady),
+				fmt.Sprintf("the cache disk %v(%v) on the node %v is not ready", id, disk.Path, node.Name),
+				nc.eventRecorder, node, v1.EventTypeWarning)
+		} else {
+			// sync engines
+			engines, err := nc.ds.ListEngines()
+			if err != nil {
+				return err
+			}
+
+			storageScheduled := int64(0)
+			for _, engine := range engines {
+				if engine.Spec.CacheDiskPath != disk.Path {
+					engine.Spec.CacheDiskPath = disk.Path
+					if _, err := nc.ds.UpdateEngine(engine); err != nil {
+						log.Errorf("Failed to update node & disk info for engine %v when syncing cache disk %v(%v), will enqueue then resync node", engine.Name, id, cacheDiskStatus.DiskUUID)
+						nc.enqueueNode(node)
+						continue
+					}
+				}
+				storageScheduled += engine.Spec.CacheSize
+			}
+			cacheDiskStatus.StorageScheduled = storageScheduled
+		}
+
+		cacheDiskStatusMap[id] = cacheDiskStatus
 	}
 
 	return nil
