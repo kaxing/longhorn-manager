@@ -47,7 +47,8 @@ type NodeController struct {
 	generateDiskConfig      GenerateDiskConfig
 	generateCacheDiskConfig GenerateCacheDiskConfig
 
-	scheduler *scheduler.ReplicaScheduler
+	replicaScheduler *scheduler.ReplicaScheduler
+	cacheScheduler   *scheduler.CacheScheduler
 }
 
 type GetDiskInfoHandler func(string) (*util.DiskInfo, error)
@@ -87,7 +88,8 @@ func NewNodeController(
 		generateCacheDiskConfig: util.GenerateCacheDiskConfig,
 	}
 
-	nc.scheduler = scheduler.NewReplicaScheduler(ds)
+	nc.replicaScheduler = scheduler.NewReplicaScheduler(ds)
+	nc.cacheScheduler = scheduler.NewCacheScheduler(ds)
 
 	ds.NodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    nc.enqueueNode,
@@ -790,11 +792,11 @@ func (nc *NodeController) syncDiskStatus(node *longhorn.Node) error {
 			diskStatus.StorageScheduled = storageScheduled
 			diskStatus.ScheduledReplica = scheduledReplica
 			// check disk pressure
-			info, err := nc.scheduler.GetDiskSchedulingInfo(disk, diskStatus)
+			info, err := nc.replicaScheduler.GetDiskSchedulingInfo(disk, diskStatus)
 			if err != nil {
 				return err
 			}
-			if !nc.scheduler.IsSchedulableToDisk(0, 0, info) {
+			if !nc.replicaScheduler.IsSchedulableToDisk(0, 0, info) {
 				diskStatus.Conditions = types.SetConditionAndRecord(diskStatus.Conditions,
 					longhorn.DiskConditionTypeSchedulable, longhorn.ConditionStatusFalse,
 					string(longhorn.DiskConditionReasonDiskPressure),
@@ -927,6 +929,7 @@ func (nc *NodeController) syncCacheDiskStatus(node *longhorn.Node) error {
 						nc.eventRecorder, node, v1.EventTypeWarning)
 				}
 			}
+
 			if cacheDiskStatus.DiskUUID == cacheDiskUUID {
 				// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
 				// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
@@ -942,6 +945,12 @@ func (nc *NodeController) syncCacheDiskStatus(node *longhorn.Node) error {
 			cacheDiskStatusMap[id] = cacheDiskStatus
 		}
 
+	}
+
+	// update Schedulable condition
+	minimalAvailablePercentage, err := nc.ds.GetSettingAsInt(types.SettingNameStorageMinimalAvailablePercentage)
+	if err != nil {
+		return err
 	}
 
 	// update Schedulable condition
@@ -975,6 +984,26 @@ func (nc *NodeController) syncCacheDiskStatus(node *longhorn.Node) error {
 				storageScheduled += engine.Spec.CacheSize
 			}
 			cacheDiskStatus.StorageScheduled = storageScheduled
+
+			// check disk pressure
+			info, err := nc.cacheScheduler.GetCacheDiskSchedulingInfo(disk, cacheDiskStatus)
+			if err != nil {
+				return err
+			}
+
+			if !nc.cacheScheduler.IsSchedulableToCacheDisk(0, info) {
+				cacheDiskStatus.Conditions = types.SetConditionAndRecord(cacheDiskStatus.Conditions,
+					longhorn.DiskConditionTypeSchedulable, longhorn.ConditionStatusFalse,
+					string(longhorn.DiskConditionReasonDiskPressure),
+					fmt.Sprintf("the cache disk %v(%v) on the node %v has %v available, but requires reserved %v, minimal %v%s to schedule more cache",
+						id, disk.Path, node.Name, cacheDiskStatus.StorageAvailable, disk.StorageReserved, minimalAvailablePercentage, "%"),
+					nc.eventRecorder, node, v1.EventTypeWarning)
+			} else {
+				cacheDiskStatus.Conditions = types.SetConditionAndRecord(cacheDiskStatus.Conditions,
+					longhorn.DiskConditionTypeSchedulable, longhorn.ConditionStatusTrue,
+					"", fmt.Sprintf("Cache disk %v(%v) on node %v is schedulable", id, disk.Path, node.Name),
+					nc.eventRecorder, node, v1.EventTypeNormal)
+			}
 		}
 
 		cacheDiskStatusMap[id] = cacheDiskStatus

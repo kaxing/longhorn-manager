@@ -471,11 +471,11 @@ func GetReplicaMountedDataPath(dataPath string) string {
 	return dataPath
 }
 
-func GetCacheMountedDataPath(dataPath string) string {
-	if !strings.HasPrefix(dataPath, CacheHostPrefix) {
-		return filepath.Join(CacheHostPrefix, dataPath)
+func GetCacheMountedDataPath(cachePath string) string {
+	if !strings.HasPrefix(cachePath, CacheHostPrefix) {
+		return filepath.Join(CacheHostPrefix, cachePath)
 	}
-	return dataPath
+	return cachePath
 }
 
 func ErrorIsNotFound(err error) bool {

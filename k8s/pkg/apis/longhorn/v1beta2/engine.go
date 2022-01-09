@@ -126,8 +126,6 @@ type EngineSpec struct {
 	// +optional
 	CacheSize int64 `json:"cacheSize"`
 	// +optional
-	CacheBlockSize int64 `json:"cacheBlockSize"`
-	// +optional
 	CacheDiskPath string `json:"cacheDiskPath"`
 }
 

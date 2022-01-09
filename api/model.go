@@ -1520,11 +1520,11 @@ func toNodeResource(node *longhorn.Node, address string, apiContext *api.ApiCont
 		}
 		if node.Status.CacheDiskStatus != nil && node.Status.CacheDiskStatus[name] != nil {
 			di.CacheDiskStatus = CacheDiskStatus{
-				Conditions:       sliceToMap(node.Status.DiskStatus[name].Conditions),
-				StorageAvailable: node.Status.DiskStatus[name].StorageAvailable,
-				StorageScheduled: node.Status.DiskStatus[name].StorageScheduled,
-				StorageMaximum:   node.Status.DiskStatus[name].StorageMaximum,
-				DiskUUID:         node.Status.DiskStatus[name].DiskUUID,
+				Conditions:       sliceToMap(node.Status.CacheDiskStatus[name].Conditions),
+				StorageAvailable: node.Status.CacheDiskStatus[name].StorageAvailable,
+				StorageScheduled: node.Status.CacheDiskStatus[name].StorageScheduled,
+				StorageMaximum:   node.Status.CacheDiskStatus[name].StorageMaximum,
+				DiskUUID:         node.Status.CacheDiskStatus[name].DiskUUID,
 			}
 		}
 		cacheDisks[name] = di

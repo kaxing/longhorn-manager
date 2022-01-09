@@ -69,7 +69,8 @@ type VolumeController struct {
 
 	cacheSyncs []cache.InformerSynced
 
-	scheduler *scheduler.ReplicaScheduler
+	replicaScheduler *scheduler.ReplicaScheduler
+	cacheScheduler   *scheduler.CacheScheduler
 
 	backoff *flowcontrol.Backoff
 
@@ -106,7 +107,8 @@ func NewVolumeController(
 		nowHandler: util.Now,
 	}
 
-	vc.scheduler = scheduler.NewReplicaScheduler(ds)
+	vc.replicaScheduler = scheduler.NewReplicaScheduler(ds)
+	vc.cacheScheduler = scheduler.NewCacheScheduler(ds)
 
 	ds.VolumeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    vc.enqueueVolume,
@@ -1038,7 +1040,7 @@ func (vc *VolumeController) ReconcileVolumeState(v *longhorn.Volume, es map[stri
 		if r.Spec.NodeID != "" {
 			continue
 		}
-		scheduledReplica, err := vc.scheduler.ScheduleReplica(r, rs, v)
+		scheduledReplica, err := vc.replicaScheduler.ScheduleReplica(r, rs, v)
 		if err != nil {
 			return err
 		}
@@ -1431,6 +1433,11 @@ func (vc *VolumeController) ReconcileVolumeState(v *longhorn.Volume, es map[stri
 		e.Spec.NodeID = v.Status.CurrentNodeID
 		e.Spec.ReplicaAddressMap = replicaAddressMap
 		e.Spec.DesireState = longhorn.InstanceStateRunning
+
+		if err := vc.cacheScheduler.ScheduleCache(e, v); err != nil {
+			log.Warnf("unable to schedule cache for volume on node %v", e.Spec.NodeID)
+		}
+
 		// The volume may be activated
 		e.Spec.DisableFrontend = v.Status.FrontendDisabled
 		e.Spec.Frontend = v.Spec.Frontend
@@ -1607,7 +1614,7 @@ func (vc *VolumeController) replenishReplicas(v *longhorn.Volume, e *longhorn.En
 	}
 
 	for i := 0; i < replenishCount; i++ {
-		reusableFailedReplica, err := vc.scheduler.CheckAndReuseFailedReplica(rs, v, hardNodeAffinity)
+		reusableFailedReplica, err := vc.replicaScheduler.CheckAndReuseFailedReplica(rs, v, hardNodeAffinity)
 		if err != nil {
 			return errors.Wrapf(err, "failed to reuse a failed replica during replica replenishment")
 		}
@@ -1624,7 +1631,7 @@ func (vc *VolumeController) replenishReplicas(v *longhorn.Volume, e *longhorn.En
 			log.Debugf("Cannot reuse failed replica %v immediately, backoff period is %v now",
 				reusableFailedReplica.Name, vc.backoff.Get(reusableFailedReplica.Name).Seconds())
 		}
-		if vc.scheduler.RequireNewReplica(rs, v, hardNodeAffinity) {
+		if vc.replicaScheduler.RequireNewReplica(rs, v, hardNodeAffinity) {
 			if err := vc.createReplica(v, e, rs, hardNodeAffinity, !newVolume); err != nil {
 				return err
 			}
@@ -2026,12 +2033,12 @@ func (vc *VolumeController) getIsSchedulableToDiskNodes(v *longhorn.Volume, node
 				continue
 			}
 
-			diskInfo, err := vc.scheduler.GetDiskSchedulingInfo(diskSpec, diskStatus)
+			diskInfo, err := vc.replicaScheduler.GetDiskSchedulingInfo(diskSpec, diskStatus)
 			if err != nil {
 				continue
 			}
 
-			if vc.scheduler.IsSchedulableToDisk(v.Spec.Size, v.Status.ActualSize, diskInfo) {
+			if vc.replicaScheduler.IsSchedulableToDisk(v.Spec.Size, v.Status.ActualSize, diskInfo) {
 				scheduleNode = true
 				break
 			}
@@ -2504,7 +2511,7 @@ func (vc *VolumeController) reconcileVolumeSize(v *longhorn.Volume, e *longhorn.
 		vc.eventRecorder.Eventf(v, v1.EventTypeNormal, EventReasonCanceledExpansion,
 			"Canceled expanding the volume %v, will automatically detach it", v.Name)
 	} else {
-		if err := vc.scheduler.CheckReplicasSizeExpansion(v, e.Spec.VolumeSize, v.Spec.Size); err != nil {
+		if err := vc.replicaScheduler.CheckReplicasSizeExpansion(v, e.Spec.VolumeSize, v.Spec.Size); err != nil {
 			log.Debugf("cannot start volume expansion: %v", err)
 			return nil
 		}
@@ -2693,7 +2700,6 @@ func (vc *VolumeController) createEngine(v *longhorn.Volume, isNewEngine bool) (
 			UpgradedReplicaAddressMap: map[string]string{},
 			RevisionCounterDisabled:   v.Spec.RevisionCounterDisabled,
 			CacheSize:                 v.Spec.CacheSize,
-			CacheBlockSize:            v.Spec.CacheBlockSize,
 		},
 	}
 
