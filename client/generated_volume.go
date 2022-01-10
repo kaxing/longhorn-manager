@@ -89,7 +89,11 @@ type Volume struct {
 
 	State string `json:"state,omitempty" yaml:"state,omitempty"`
 
+	CacheEnabled bool `json:"cacheEnabled,omitempty" yaml:"cache_enabled,omitempty"`
+
 	CacheSize string `json:"cacheSize,omitempty" yaml:"cache_size,omitempty"`
+
+	CachePercentage string `json:"cachePercentage,omitempty" yaml:"cache_percentage,omitempty"`
 
 	CacheBlockSize string `json:"cacheBlockSize,omitempty" yaml:"cache_block_size,omitempty"`
 }

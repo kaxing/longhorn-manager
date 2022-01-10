@@ -122,16 +122,20 @@ func getVolumeOptions(volOptions map[string]string) (*longhornclient.Volume, err
 		vol.Encrypted = isEncrypted
 	}
 
-	if cacheSize, ok := volOptions["cacheSize"]; ok {
-		size, err := util.ConvertSize(cacheSize)
-		if err != nil || size < 0 {
-			return nil, errors.Wrap(err, "Invalid parameter cacheSize")
+	if cacheEnabled, ok := volOptions["cacheEnabled"]; ok {
+		isCacheEnabled, err := strconv.ParseBool(cacheEnabled)
+		if err != nil {
+			return nil, errors.Wrap(err, "Invalid parameter cacheEnabled")
 		}
-		if size == 0 {
-			size = types.DefaultCacheBlockSize
+		vol.CacheEnabled = isCacheEnabled
+	}
+
+	if cachePercentage, ok := volOptions["cachePercentage"]; ok {
+		percentage, err := strconv.Atoi(cachePercentage)
+		if err != nil || percentage < 0 || percentage > 100 {
+			return nil, errors.Wrap(err, "Invalid parameter Percentage")
 		}
-		size = util.RoundUpSize(size, util.CacheSizeAlignment)
-		vol.CacheSize = strconv.FormatInt(size, 10)
+		vol.CachePercentage = strconv.Itoa(percentage)
 	}
 
 	if cacheBlockSize, ok := volOptions["cacheBlockSize"]; ok {

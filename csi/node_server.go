@@ -382,7 +382,7 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 
 	logrus.Infof("volume %v device %v contains filesystem of format %v", volumeID, devicePath, diskFormat)
 
-	if volume.CacheSize != "0" {
+	if volume.CacheEnabled {
 		cacheBlockSize, err := strconv.ParseInt(volume.CacheBlockSize, 10, 64)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to parse cache block size")

@@ -197,6 +197,8 @@ type VolumeSpec struct {
 	// +optional
 	ReplicaAutoBalance ReplicaAutoBalance `json:"replicaAutoBalance"`
 	// +optional
+	CacheEnabled bool `json:"cacheEnabled"`
+	// +optional
 	CacheSize int64 `json:"cacheSize"`
 	// +optional
 	CacheBlockSize int64 `json:"cacheBlockSize"`
@@ -253,6 +255,8 @@ type VolumeStatus struct {
 	ShareEndpoint string `json:"shareEndpoint"`
 	// +optional
 	ShareState ShareManagerState `json:"shareState"`
+	// +optional
+	CacheEnabled bool `json:"cacheEnabled"`
 }
 
 // +genclient

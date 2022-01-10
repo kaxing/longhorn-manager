@@ -1890,9 +1890,6 @@ spec:
                 type: boolean
               backupVolume:
                 type: string
-              cacheBlockSize:
-                format: int64
-                type: integer
               cacheDiskPath:
                 type: string
               cacheSize:
@@ -3700,6 +3697,8 @@ spec:
               cacheBlockSize:
                 format: int64
                 type: integer
+              cacheEnabled:
+                type: boolean
               cacheSize:
                 format: int64
                 type: integer
@@ -3797,6 +3796,8 @@ spec:
               actualSize:
                 format: int64
                 type: integer
+              cacheEnabled:
+                type: boolean
               cloneStatus:
                 properties:
                   snapshot:

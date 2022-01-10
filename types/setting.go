@@ -31,7 +31,6 @@ const (
 	SettingNameAllowRecurringJobWhileVolumeDetached         = SettingName("allow-recurring-job-while-volume-detached")
 	SettingNameCreateDefaultDiskLabeledNodes                = SettingName("create-default-disk-labeled-nodes")
 	SettingNameDefaultDataPath                              = SettingName("default-data-path")
-	SettingNameDefaultCachePath                             = SettingName("default-cache-path")
 	SettingNameDefaultCachePercentage                       = SettingName("default-cache-percentage")
 	SettingNameDefaultCacheBlockSize                        = SettingName("default-cache-block-size")
 	SettingNameDefaultEngineImage                           = SettingName("default-engine-image")
@@ -83,7 +82,6 @@ var (
 		SettingNameAllowRecurringJobWhileVolumeDetached,
 		SettingNameCreateDefaultDiskLabeledNodes,
 		SettingNameDefaultDataPath,
-		SettingNameDefaultCachePath,
 		SettingNameDefaultCachePercentage,
 		SettingNameDefaultCacheBlockSize,
 		SettingNameDefaultEngineImage,
@@ -156,7 +154,6 @@ var (
 		SettingNameAllowRecurringJobWhileVolumeDetached:         SettingDefinitionAllowRecurringJobWhileVolumeDetached,
 		SettingNameCreateDefaultDiskLabeledNodes:                SettingDefinitionCreateDefaultDiskLabeledNodes,
 		SettingNameDefaultDataPath:                              SettingDefinitionDefaultDataPath,
-		SettingNameDefaultCachePath:                             SettingDefinitionDefaultCachePath,
 		SettingNameDefaultCachePercentage:                       SettingDefinitionDefaultCachePercentage,
 		SettingNameDefaultCacheBlockSize:                        SettingDefinitionDefaultCacheBlockSize,
 		SettingNameDefaultEngineImage:                           SettingDefinitionDefaultEngineImage,
@@ -263,16 +260,6 @@ var (
 		Default:     "/var/lib/longhorn/",
 	}
 
-	SettingDefinitionDefaultCachePath = SettingDefinition{
-		DisplayName: "Default Cache Path",
-		Description: "Default path to use for storing cache files on a host",
-		Category:    SettingCategoryGeneral,
-		Type:        SettingTypeString,
-		Required:    true,
-		ReadOnly:    false,
-		Default:     "",
-	}
-
 	SettingDefinitionDefaultCachePercentage = SettingDefinition{
 		DisplayName: "Default Cache Percentage",
 		Description: "Default ratio of the cache device size to volume size, expressed as a percentage.",
@@ -285,7 +272,7 @@ var (
 
 	SettingDefinitionDefaultCacheBlockSize = SettingDefinition{
 		DisplayName: "Default Cache Block Size",
-		Description: "Default cache block size of ache devices.",
+		Description: "Default cache block size of cache devices.",
 		Category:    SettingCategoryGeneral,
 		Type:        SettingTypeInt,
 		Required:    true,

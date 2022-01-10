@@ -222,9 +222,7 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 	size = util.RoundUpSize(size, util.SizeAlignment)
 
 	cacheBlockSize = util.RoundUpSize(cacheBlockSize, util.CacheSizeAlignment)
-	if cacheSize > 0 {
-		cacheSize = util.RoundUpSize(cacheSize, util.CacheSizeAlignment)
-	}
+	cacheSize = util.RoundUpSize(cacheSize, util.CacheSizeAlignment)
 
 	if spec.NumberOfReplicas == 0 {
 		spec.NumberOfReplicas, err = m.getDefaultReplicaCount()
@@ -308,6 +306,7 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 		},
 		Spec: longhorn.VolumeSpec{
 			Size:                    size,
+			CacheEnabled:            spec.CacheEnabled,
 			CacheSize:               cacheSize,
 			CacheBlockSize:          cacheBlockSize,
 			AccessMode:              spec.AccessMode,

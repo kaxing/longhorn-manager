@@ -25,9 +25,6 @@ type Volume struct {
 	Name string `json:"name"`
 	Size string `json:"size"`
 
-	CacheSize      string `json:"cacheSize"`
-	CacheBlockSize string `json:"cacheBlockSize"`
-
 	Frontend                longhorn.VolumeFrontend   `json:"frontend"`
 	DisableFrontend         bool                      `json:"disableFrontend"`
 	FromBackup              string                    `json:"fromBackup"`
@@ -66,6 +63,11 @@ type Volume struct {
 	Migratable bool `json:"migratable"`
 
 	Encrypted bool `json:"encrypted"`
+
+	CacheEnabled    bool   `json:"cacheEnabled"`
+	CachePercentage string `json:"cachePercentage"`
+	CacheSize       string `json:"cacheSize"`
+	CacheBlockSize  string `json:"cacheBlockSize"`
 
 	Replicas      []Replica       `json:"replicas"`
 	Controllers   []Controller    `json:"controllers"`
@@ -1105,10 +1107,8 @@ func toVolumeResource(v *longhorn.Volume, ves []*longhorn.Engine, vrs []*longhor
 			Actions: map[string]string{},
 			Links:   map[string]string{},
 		},
-		Name:           v.Name,
-		Size:           strconv.FormatInt(v.Spec.Size, 10),
-		CacheSize:      strconv.FormatInt(v.Spec.CacheSize, 10),
-		CacheBlockSize: strconv.FormatInt(v.Spec.CacheBlockSize, 10),
+		Name: v.Name,
+		Size: strconv.FormatInt(v.Spec.Size, 10),
 
 		Frontend:            v.Spec.Frontend,
 		DisableFrontend:     v.Spec.DisableFrontend,
@@ -1138,6 +1138,10 @@ func toVolumeResource(v *longhorn.Volume, ves []*longhorn.Engine, vrs []*longhor
 		AccessMode:    v.Spec.AccessMode,
 		ShareEndpoint: v.Status.ShareEndpoint,
 		ShareState:    v.Status.ShareState,
+
+		CacheEnabled:   v.Status.CacheEnabled,
+		CacheSize:      strconv.FormatInt(v.Spec.CacheSize, 10),
+		CacheBlockSize: strconv.FormatInt(v.Spec.CacheBlockSize, 10),
 
 		Migratable: v.Spec.Migratable,
 

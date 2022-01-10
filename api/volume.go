@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
@@ -11,6 +12,7 @@ import (
 	"github.com/rancher/go-rancher/client"
 
 	"github.com/longhorn/longhorn-manager/datastore"
+	"github.com/longhorn/longhorn-manager/types"
 	"github.com/longhorn/longhorn-manager/util"
 
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
@@ -132,12 +134,31 @@ func (s *Server) VolumeCreate(rw http.ResponseWriter, req *http.Request) error {
 		return fmt.Errorf("fail to parse size %v", err)
 	}
 
-	cacheSize, err := util.ConvertSize(volume.CacheSize)
+	// Parse cachePercentage or use default value.
+	cachePercentage := 0
+	value := volume.CachePercentage
+	if value == "" {
+		value, err = s.m.GetSettingValueExisted(types.SettingNameDefaultCachePercentage)
+		if err != nil {
+			return fmt.Errorf("unable to get %v setting", types.SettingNameDefaultCachePercentage)
+		}
+	}
+	cachePercentage, err = strconv.Atoi(value)
 	if err != nil {
 		return fmt.Errorf("fail to parse %v", err)
 	}
+	cacheSize := util.RoundUpSize(size*int64(cachePercentage)/100, util.CacheSizeAlignment)
 
-	cacheBlockSize, err := util.ConvertSize(volume.CacheBlockSize)
+	// Parse cacheBlockSize or use default value.
+	cacheBlockSize := int64(0)
+	value = volume.CacheBlockSize
+	if value == "" {
+		value, err = s.m.GetSettingValueExisted(types.SettingNameDefaultCacheBlockSize)
+		if err != nil {
+			return fmt.Errorf("unable to get %v setting", types.SettingNameDefaultCacheBlockSize)
+		}
+	}
+	cacheBlockSize, err = util.ConvertSize(value)
 	if err != nil {
 		return fmt.Errorf("fail to parse %v", err)
 	}
@@ -168,6 +189,7 @@ func (s *Server) VolumeCreate(rw http.ResponseWriter, req *http.Request) error {
 
 	v, err := s.m.Create(volume.Name, &longhorn.VolumeSpec{
 		Size:                    size,
+		CacheEnabled:            volume.CacheEnabled,
 		CacheSize:               cacheSize,
 		CacheBlockSize:          cacheBlockSize,
 		AccessMode:              volume.AccessMode,
