@@ -1437,7 +1437,7 @@ func (vc *VolumeController) ReconcileVolumeState(v *longhorn.Volume, es map[stri
 		if v.Spec.CacheEnabled {
 			v.Status.CacheEnabled = true
 			if err := vc.cacheScheduler.ScheduleCache(e, v); err != nil {
-				log.Warnf("unable to schedule cache for volume on node %v", e.Spec.NodeID)
+				log.Warnf("unable to schedule cache for volume on node %v: %v", e.Spec.NodeID, err)
 				v.Status.CacheEnabled = false
 			}
 		}
