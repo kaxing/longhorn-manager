@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/longhorn/longhorn-manager/datastore"
 	lhclientset "github.com/longhorn/longhorn-manager/k8s/pkg/client/clientset/versioned"
 	lhinformers "github.com/longhorn/longhorn-manager/k8s/pkg/client/informers/externalversions"
+	"github.com/longhorn/longhorn-manager/types"
 )
 
 type Client struct {
@@ -23,7 +25,7 @@ type Client struct {
 	Datastore *datastore.DataStore
 }
 
-func New(ctx context.Context, config *rest.Config, namespace string) (*Client, error) {
+func New(ctx context.Context, config *rest.Config, namespace, serverType string) (*Client, error) {
 	if err := schemes.Register(v1.AddToScheme); err != nil {
 		return nil, err
 	}
@@ -45,7 +47,17 @@ func New(ctx context.Context, config *rest.Config, namespace string) (*Client, e
 
 	kubeInformerFactory := informers.NewSharedInformerFactory(kubeClient, time.Second*30)
 	lhInformerFactory := lhinformers.NewSharedInformerFactory(lhClient, time.Second*30)
+
 	datastore := datastore.NewDataStore(lhInformerFactory, lhClient, kubeInformerFactory, kubeClient, namespace)
+
+	if serverType == types.WebhookTypeAdmission {
+		go kubeInformerFactory.Start(ctx.Done())
+		go lhInformerFactory.Start(ctx.Done())
+
+		if !datastore.Sync(ctx.Done()) {
+			return nil, fmt.Errorf("datastore cache sync up failed")
+		}
+	}
 
 	return &Client{
 		Clients:   *clients,

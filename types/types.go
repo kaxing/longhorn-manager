@@ -35,8 +35,12 @@ const (
 )
 
 const (
-	DefaultAPIPort           = 9500
-	DefaultWebhookServerPort = 9443
+	DefaultAPIPort                     = 9500
+	DefaultConversionWebhookServerPort = 9443
+	DefaultAdmissionWebhookServerPort  = 9444
+
+	WebhookTypeConversion = "conversion"
+	WebhookTypeAdmission  = "admission"
 
 	ValidatingWebhookName = "longhorn-webhook-validator"
 	MutatingWebhookName   = "longhorn-webhook-mutator"
