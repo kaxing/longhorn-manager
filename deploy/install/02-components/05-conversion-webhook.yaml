@@ -2,18 +2,18 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: longhorn-webhook
-  name: longhorn-webhook
+    app: longhorn-conversion-webhook
+  name: longhorn-conversion-webhook
   namespace: longhorn-system
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: longhorn-webhook
+      app: longhorn-conversion-webhook
   template:
     metadata:
       labels:
-        app: longhorn-webhook
+        app: longhorn-conversion-webhook
     spec:
       affinity:
         podAntiAffinity:
@@ -25,20 +25,20 @@ spec:
                 - key: app
                   operator: In
                   values:
-                  - longhorn-webhook
+                  - longhorn-conversion-webhook
               topologyKey: kubernetes.io/hostname
       containers:
-      - name: longhorn-webhook
+      - name: longhorn-conversion-webhook
         image: longhornio/longhorn-manager:master-head
         imagePullPolicy: IfNotPresent
         command:
         - longhorn-manager
-        - webhook
+        - conversion-webhook
         - --service-account
         - longhorn-service-account
         ports:
         - containerPort: 9443
-          name: webhook
+          name: conversion-wh
         readinessProbe:
           tcpSocket:
             port: 9443
