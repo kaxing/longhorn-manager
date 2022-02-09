@@ -52,26 +52,8 @@ func mutateNode(newObj runtime.Object) (admission.PatchOps, error) {
 	if node.Spec.Tags == nil {
 		patchOps = append(patchOps, `{"op": "replace", "path": "/spec/tags", "value": []}`)
 	} else {
-		tags, err := util.ValidateTags(node.Spec.Tags)
-		if err != nil {
-			return nil, err
-		}
-		bytes, err := json.Marshal(tags)
-		if err != nil {
-			return nil, err
-		}
-		patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/tags", "value": %s}`, string(bytes)))
-	}
-
-	if node.Spec.Disks == nil {
-		patchOps = append(patchOps, `{"op": "replace", "path": "/spec/disks", "value": {}}`)
-	}
-
-	for name, disk := range node.Spec.Disks {
-		if disk.Tags == nil {
-			patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/disks/%s/tags", "value": []}`, name))
-		} else {
-			tags, err := util.ValidateTags(disk.Tags)
+		if len(node.Spec.Tags) > 0 {
+			tags, err := util.ValidateTags(node.Spec.Tags)
 			if err != nil {
 				return nil, err
 			}
@@ -79,7 +61,29 @@ func mutateNode(newObj runtime.Object) (admission.PatchOps, error) {
 			if err != nil {
 				return nil, err
 			}
-			patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/disks/%s/tags", "value": %s}`, name, string(bytes)))
+			patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/tags", "value": %s}`, string(bytes)))
+		}
+	}
+
+	if node.Spec.Disks == nil {
+		patchOps = append(patchOps, `{"op": "replace", "path": "/spec/disks", "value": {}}`)
+	} else {
+		for name, disk := range node.Spec.Disks {
+			if disk.Tags == nil {
+				patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/disks/%s/tags", "value": []}`, name))
+			} else {
+				if len(disk.Tags) > 0 {
+					tags, err := util.ValidateTags(disk.Tags)
+					if err != nil {
+						return nil, err
+					}
+					bytes, err := json.Marshal(tags)
+					if err != nil {
+						return nil, err
+					}
+					patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/disks/%s/tags", "value": %s}`, name, string(bytes)))
+				}
+			}
 		}
 	}
 
