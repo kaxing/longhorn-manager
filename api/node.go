@@ -112,15 +112,6 @@ func (s *Server) DiskUpdate(rw http.ResponseWriter, req *http.Request) error {
 		return errors.Wrap(err, "fail to get node ip")
 	}
 
-	// Only scheduling disabled disk can be evicted
-	// Can not enable scheduling on an evicting disk
-	for diskName, diskSpec := range diskUpdate.Disks {
-		if diskSpec.EvictionRequested &&
-			diskSpec.AllowScheduling {
-			return fmt.Errorf("need to disable scheduling on disk %v for disk eviction, or cancel eviction to enable scheduling on this disk", diskName)
-		}
-	}
-
 	obj, err := util.RetryOnConflictCause(func() (interface{}, error) {
 		return s.m.DiskUpdate(id, diskUpdate.Disks)
 	})
