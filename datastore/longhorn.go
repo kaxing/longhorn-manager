@@ -3201,9 +3201,6 @@ func (s *DataStore) RemoveFinalizerForBackup(backup *longhorn.Backup) error {
 // CreateRecurringJob creates a Longhorn RecurringJob resource and verifies
 // creation
 func (s *DataStore) CreateRecurringJob(recurringJob *longhorn.RecurringJob) (*longhorn.RecurringJob, error) {
-	if err := initRecurringJob(recurringJob); err != nil {
-		return nil, err
-	}
 	ret, err := s.lhClient.LonghornV1beta2().RecurringJobs(s.namespace).Create(context.TODO(), recurringJob, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
