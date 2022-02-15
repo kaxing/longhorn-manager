@@ -35,14 +35,14 @@ func (v *volumeMutator) Resource() admission.Resource {
 }
 
 func (v *volumeMutator) Create(request *admission.Request, newObj runtime.Object) (admission.PatchOps, error) {
-	return mutateVolume(newObj)
+	return v.mutateVolumeOnCreate(newObj)
 }
 
 func (v *volumeMutator) Update(request *admission.Request, oldObj runtime.Object, newObj runtime.Object) (admission.PatchOps, error) {
-	return mutateVolume(newObj)
+	return v.mutateVolumeOnUpdate(oldObj, newObj)
 }
 
-func mutateVolume(newObj runtime.Object) (admission.PatchOps, error) {
+func (v *volumeMutator) mutateVolumeOnCreate(newObj runtime.Object) (admission.PatchOps, error) {
 	var patchOps admission.PatchOps
 
 	volume := newObj.(*longhorn.Volume)
@@ -60,6 +60,35 @@ func mutateVolume(newObj runtime.Object) (admission.PatchOps, error) {
 		patchOps = append(patchOps, `{"op": "replace", "path": "/spec/recurringJobs", "value": []}`)
 	}
 	for id, job := range volume.Spec.RecurringJobs {
+		if job.Groups == nil {
+			patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/recurringJobs/%d/groups", "value": []}`, id))
+		}
+		if job.Labels == nil {
+			patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/recurringJobs/%d/labels", "value": {}}`, id))
+		}
+	}
+
+	return patchOps, nil
+}
+
+func (v *volumeMutator) mutateVolumeOnUpdate(oldObj, newObj runtime.Object) (admission.PatchOps, error) {
+	var patchOps admission.PatchOps
+
+	newVolume := newObj.(*longhorn.Volume)
+
+	if newVolume.Spec.ReplicaAutoBalance == "" {
+		patchOps = append(patchOps, `{"op": "replace", "path": "/spec/replicaAutoBalance", "value": "ignored"}`)
+	}
+	if newVolume.Spec.DiskSelector == nil {
+		patchOps = append(patchOps, `{"op": "replace", "path": "/spec/diskSelector", "value": []}`)
+	}
+	if newVolume.Spec.NodeSelector == nil {
+		patchOps = append(patchOps, `{"op": "replace", "path": "/spec/nodeSelector", "value": []}`)
+	}
+	if newVolume.Spec.RecurringJobs == nil {
+		patchOps = append(patchOps, `{"op": "replace", "path": "/spec/recurringJobs", "value": []}`)
+	}
+	for id, job := range newVolume.Spec.RecurringJobs {
 		if job.Groups == nil {
 			patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/spec/recurringJobs/%d/groups", "value": []}`, id))
 		}

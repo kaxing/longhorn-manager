@@ -295,7 +295,7 @@ func (s *DataStore) GetCredentialFromSecret(secretName string) (map[string]strin
 	return credentialSecret, nil
 }
 
-func checkVolume(v *longhorn.Volume) error {
+func CheckVolume(v *longhorn.Volume) error {
 	size, err := util.ConvertSize(v.Spec.Size)
 	if err != nil {
 		return err
@@ -379,7 +379,7 @@ func (s *DataStore) CreateVolume(v *longhorn.Volume) (*longhorn.Volume, error) {
 	if err := initVolume(v); err != nil {
 		return nil, err
 	}
-	if err := checkVolume(v); err != nil {
+	if err := CheckVolume(v); err != nil {
 		return nil, err
 	}
 	if err := fixupMetadata(v.Name, v); err != nil {
@@ -449,7 +449,7 @@ func initVolume(v *longhorn.Volume) error {
 
 // UpdateVolume updates Longhorn Volume and verifies update
 func (s *DataStore) UpdateVolume(v *longhorn.Volume) (*longhorn.Volume, error) {
-	if err := checkVolume(v); err != nil {
+	if err := CheckVolume(v); err != nil {
 		return nil, err
 	}
 	if err := fixupMetadata(v.Name, v); err != nil {

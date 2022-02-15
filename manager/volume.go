@@ -380,36 +380,6 @@ func (m *VolumeManager) Attach(name, nodeID string, disableFrontend bool, attach
 		return nil, err
 	}
 
-	if isReady, err := m.ds.CheckEngineImageReadyOnAtLeastOneVolumeReplica(v.Spec.EngineImage, v.Name, nodeID); !isReady {
-		if err != nil {
-			return nil, fmt.Errorf("cannot attach volume %v with image %v: %v", v.Name, v.Spec.EngineImage, err)
-		}
-		return nil, fmt.Errorf("cannot attach volume %v because the engine image %v is not deployed on at least one of the the replicas' nodes or the node that the volume is going to attach to", v.Name, v.Spec.EngineImage)
-	}
-
-	restoreCondition := types.GetCondition(v.Status.Conditions, longhorn.VolumeConditionTypeRestore)
-	if restoreCondition.Status == longhorn.ConditionStatusTrue {
-		return nil, fmt.Errorf("volume %v is restoring data", name)
-	}
-
-	if v.Status.RestoreRequired {
-		return nil, fmt.Errorf("volume %v is pending restoring", name)
-	}
-
-	if v.Spec.NodeID == nodeID {
-		logrus.Debugf("Volume %v is already attached to node %v", v.Name, v.Spec.NodeID)
-		return v, nil
-	}
-
-	if v.Spec.MigrationNodeID == nodeID {
-		logrus.Debugf("Volume %v is already migrating to node %v from node %v", v.Name, nodeID, v.Spec.NodeID)
-		return v, nil
-	}
-
-	if v.Spec.AccessMode != longhorn.AccessModeReadWriteMany && v.Status.State != longhorn.VolumeStateDetached {
-		return nil, fmt.Errorf("invalid state %v to attach RWO volume %v", v.Status.State, name)
-	}
-
 	isVolumeShared := v.Spec.AccessMode == longhorn.AccessModeReadWriteMany && !v.Spec.Migratable
 	isVolumeDetached := v.Spec.NodeID == ""
 	if isVolumeDetached {
@@ -470,26 +440,6 @@ func (m *VolumeManager) Detach(name, nodeID string) (v *longhorn.Volume, err err
 	v, err = m.ds.GetVolume(name)
 	if err != nil {
 		return nil, err
-	}
-
-	if v.Status.IsStandby {
-		return nil, fmt.Errorf("cannot detach standby volume %v", v.Name)
-	}
-
-	if v.Spec.NodeID == "" && v.Spec.MigrationNodeID == "" {
-		logrus.Infof("No need to detach volume %v is already detached from all nodes", v.Name)
-		return v, nil
-	}
-
-	// shared volumes only need to be detached if they are attached in maintenance mode
-	if v.Spec.AccessMode == longhorn.AccessModeReadWriteMany && !v.Spec.Migratable && !v.Spec.DisableFrontend {
-		logrus.Infof("No need to detach volume %v since it's shared via %v", v.Name, v.Status.ShareEndpoint)
-		return v, nil
-	}
-
-	if nodeID != "" && nodeID != v.Spec.NodeID && nodeID != v.Spec.MigrationNodeID {
-		logrus.Infof("No need to detach volume %v since it's not attached to node %v", v.Name, nodeID)
-		return v, nil
 	}
 
 	isMigratingVolume := v.Spec.Migratable && v.Spec.MigrationNodeID != "" && v.Spec.NodeID != ""
@@ -629,34 +579,6 @@ func (m *VolumeManager) Activate(volumeName string, frontend string) (v *longhor
 	}
 	if !v.Spec.Standby {
 		return nil, fmt.Errorf("volume %v is being activated", v.Name)
-	}
-
-	if frontend != string(longhorn.VolumeFrontendBlockDev) && frontend != string(longhorn.VolumeFrontendISCSI) {
-		return nil, fmt.Errorf("invalid frontend %v", frontend)
-	}
-
-	v, err = m.ds.GetVolume(volumeName)
-	if err != nil {
-		return nil, err
-	}
-
-	var engine *longhorn.Engine
-	es, err := m.ds.ListVolumeEngines(v.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list engines for volume %v: %v", v.Name, err)
-	}
-	if len(es) != 1 {
-		return nil, fmt.Errorf("found more than 1 engines for volume %v", v.Name)
-	}
-	for _, e := range es {
-		engine = e
-	}
-
-	if v.Status.LastBackup != engine.Status.LastRestoredBackup || engine.Spec.RequestedBackupRestore != engine.Status.LastRestoredBackup {
-		logrus.Infof("Standby volume %v will be activated after finishing restoration, "+
-			"backup volume's latest backup: %v, "+
-			"engine requested backup restore: %v, engine last restored backup: %v",
-			v.Name, v.Status.LastBackup, engine.Spec.RequestedBackupRestore, engine.Status.LastRestoredBackup)
 	}
 
 	v.Spec.Frontend = longhorn.VolumeFrontend(frontend)
@@ -969,24 +891,6 @@ func (m *VolumeManager) EngineUpgrade(volumeName, image string) (v *longhorn.Vol
 		err = errors.Wrapf(err, "cannot upgrade engine for volume %v using image %v", volumeName, image)
 	}()
 
-	// Only allow to upgrade to the default engine image if the setting `Automatically upgrade volumes' engine to the default engine image` is enabled
-	concurrentAutomaticEngineUpgradePerNodeLimit, err := m.ds.GetSettingAsInt(types.SettingNameConcurrentAutomaticEngineUpgradePerNodeLimit)
-	if err != nil {
-		return nil, err
-	}
-	if concurrentAutomaticEngineUpgradePerNodeLimit > 0 {
-		defaultEngineImage, err := m.ds.GetSettingValueExisted(types.SettingNameDefaultEngineImage)
-		if err != nil {
-			return nil, err
-		}
-		if image != defaultEngineImage {
-			return nil, fmt.Errorf("updrading to %v is not allowed. "+
-				"Only allow to upgrade to the default engine image %v because the setting "+
-				"`Concurrent Automatic Engine Upgrade Per Node Limit` is greater than 0",
-				image, defaultEngineImage)
-		}
-	}
-
 	v, err = m.ds.GetVolume(volumeName)
 	if err != nil {
 		return nil, err
@@ -995,35 +899,6 @@ func (m *VolumeManager) EngineUpgrade(volumeName, image string) (v *longhorn.Vol
 	if v.Spec.EngineImage == image {
 		return nil, fmt.Errorf("upgrading in process for volume %v engine image from %v to %v already",
 			v.Name, v.Status.CurrentImage, v.Spec.EngineImage)
-	}
-
-	if v.Spec.EngineImage != v.Status.CurrentImage && image != v.Status.CurrentImage {
-		return nil, fmt.Errorf("upgrading in process for volume %v engine image from %v to %v, cannot upgrade to another engine image",
-			v.Name, v.Status.CurrentImage, v.Spec.EngineImage)
-	}
-
-	if isReady, err := m.ds.CheckEngineImageReadyOnAllVolumeReplicas(image, v.Name, v.Status.CurrentNodeID); !isReady {
-		if err != nil {
-			return nil, fmt.Errorf("cannot upgrade engine image for volume %v from image %v to image %v: %v", v.Name, v.Spec.EngineImage, image, err)
-		}
-		return nil, fmt.Errorf("cannot upgrade engine image for volume %v from image %v to image %v because the engine image %v is not deployed on the replicas' nodes or the node that the volume is attached to", v.Name, v.Spec.EngineImage, image, image)
-	}
-
-	if isReady, err := m.ds.CheckEngineImageReadyOnAllVolumeReplicas(v.Status.CurrentImage, v.Name, v.Status.CurrentNodeID); !isReady {
-		if err != nil {
-			return nil, fmt.Errorf("cannot upgrade engine image for volume %v from image %v to image %v: %v", v.Name, v.Spec.EngineImage, image, err)
-		}
-		return nil, fmt.Errorf("cannot upgrade engine image for volume %v from image %v to image %v because the volume's current engine image %v is not deployed on the replicas' nodes or the node that the volume is attached to", v.Name, v.Spec.EngineImage, image, v.Status.CurrentImage)
-	}
-
-	if v.Spec.MigrationNodeID != "" {
-		return nil, fmt.Errorf("cannot upgrade during migration")
-	}
-
-	// Note: Rebuild is not supported for old DR volumes and the handling of a degraded DR volume live upgrade will get stuck.
-	//  Hence if you modify this part, the live upgrade should be prevented in API level for all old DR volumes.
-	if v.Status.State == longhorn.VolumeStateAttached && v.Status.Robustness != longhorn.VolumeRobustnessHealthy {
-		return nil, fmt.Errorf("cannot do live upgrade for a unhealthy volume %v", v.Name)
 	}
 
 	oldImage := v.Spec.EngineImage
@@ -1047,23 +922,9 @@ func (m *VolumeManager) UpdateReplicaCount(name string, count int) (v *longhorn.
 		err = errors.Wrapf(err, "unable to update replica count for volume %v", name)
 	}()
 
-	if err := types.ValidateReplicaCount(count); err != nil {
-		return nil, err
-	}
-
 	v, err = m.ds.GetVolume(name)
 	if err != nil {
 		return nil, err
-	}
-
-	if v.Spec.NodeID == "" || v.Status.State != longhorn.VolumeStateAttached {
-		return nil, fmt.Errorf("invalid volume state to update replica count%v", v.Status.State)
-	}
-	if v.Spec.EngineImage != v.Status.CurrentImage {
-		return nil, fmt.Errorf("upgrading in process, cannot update replica count")
-	}
-	if v.Spec.MigrationNodeID != "" {
-		return nil, fmt.Errorf("migration in process, cannot update replica count")
 	}
 
 	oldCount := v.Spec.NumberOfReplicas
@@ -1082,22 +943,14 @@ func (m *VolumeManager) UpdateReplicaAutoBalance(name string, inputSpec longhorn
 		err = errors.Wrapf(err, "unable to update replica auto-balance for volume %v", name)
 	}()
 
-	if err = types.ValidateReplicaAutoBalance(inputSpec); err != nil {
-		return nil, err
-	}
-
 	v, err = m.ds.GetVolume(name)
 	if err != nil {
 		return nil, err
 	}
 
-	if v.Spec.ReplicaAutoBalance == inputSpec {
-		logrus.Debugf("Volume %v already has replica auto-balance set to %v", v.Name, inputSpec)
-		return v, nil
-	}
-
 	oldSpec := v.Spec.ReplicaAutoBalance
 	v.Spec.ReplicaAutoBalance = inputSpec
+
 	v, err = m.ds.UpdateVolume(v)
 	if err != nil {
 		return nil, err
@@ -1112,22 +965,14 @@ func (m *VolumeManager) UpdateDataLocality(name string, dataLocality longhorn.Da
 		err = errors.Wrapf(err, "unable to update data locality for volume %v", name)
 	}()
 
-	if err := types.ValidateDataLocality(dataLocality); err != nil {
-		return nil, err
-	}
-
 	v, err = m.ds.GetVolume(name)
 	if err != nil {
 		return nil, err
 	}
 
-	if v.Spec.DataLocality == dataLocality {
-		logrus.Debugf("Volume %v already has data locality %v", v.Name, dataLocality)
-		return v, nil
-	}
-
 	oldDataLocality := v.Spec.DataLocality
 	v.Spec.DataLocality = dataLocality
+
 	v, err = m.ds.UpdateVolume(v)
 	if err != nil {
 		return nil, err
@@ -1151,17 +996,9 @@ func (m *VolumeManager) UpdateAccessMode(name string, accessMode longhorn.Access
 		return nil, err
 	}
 
-	if v.Spec.AccessMode == accessMode {
-		logrus.Debugf("Volume %v already has access mode %v", v.Name, accessMode)
-		return v, nil
-	}
-
-	if v.Spec.NodeID != "" || v.Status.State != longhorn.VolumeStateDetached {
-		return nil, fmt.Errorf("can only update volume access mode while volume is detached")
-	}
-
 	oldAccessMode := v.Spec.AccessMode
 	v.Spec.AccessMode = accessMode
+
 	v, err = m.ds.UpdateVolume(v)
 	if err != nil {
 		return nil, err
