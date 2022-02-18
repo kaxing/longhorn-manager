@@ -12,6 +12,7 @@ import (
 	"github.com/longhorn/longhorn-manager/webhook/resources/node"
 	"github.com/longhorn/longhorn-manager/webhook/resources/recurringjob"
 	"github.com/longhorn/longhorn-manager/webhook/resources/setting"
+	"github.com/longhorn/longhorn-manager/webhook/resources/volume"
 )
 
 func Validation(client *client.Client) (http.Handler, []admission.Resource, error) {
@@ -22,6 +23,7 @@ func Validation(client *client.Client) (http.Handler, []admission.Resource, erro
 		engineimage.NewValidator(client.Datastore),
 		recurringjob.NewValidator(client.Datastore),
 		backingimage.NewValidator(client.Datastore),
+		volume.NewValidator(client.Datastore),
 	}
 
 	router := webhook.NewRouter()
