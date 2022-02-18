@@ -18,7 +18,6 @@ import (
 	"github.com/longhorn/backupstore"
 
 	"github.com/longhorn/longhorn-manager/datastore"
-	"github.com/longhorn/longhorn-manager/engineapi"
 	"github.com/longhorn/longhorn-manager/scheduler"
 	"github.com/longhorn/longhorn-manager/types"
 	"github.com/longhorn/longhorn-manager/util"
@@ -147,14 +146,6 @@ func (m *VolumeManager) GetReplicasSorted(vName string) ([]*longhorn.Replica, er
 	return replicas, nil
 }
 
-func (m *VolumeManager) getDefaultReplicaCount() (int, error) {
-	c, err := m.ds.GetSettingAsInt(types.SettingNameDefaultReplicaCount)
-	if err != nil {
-		return 0, err
-	}
-	return int(c), nil
-}
-
 func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurringJobSelector []longhorn.VolumeRecurringJob) (v *longhorn.Volume, err error) {
 	defer func() {
 		err = errors.Wrapf(err, "unable to create volume %v", name)
@@ -216,63 +207,9 @@ func (m *VolumeManager) Create(name string, spec *longhorn.VolumeSpec, recurring
 	// make sure it's multiples of 4096
 	size = util.RoundUpSize(size)
 
-	if spec.NumberOfReplicas == 0 {
-		spec.NumberOfReplicas, err = m.getDefaultReplicaCount()
-		if err != nil {
-			return nil, errors.Wrap(err, "BUG: cannot get valid number for setting default replica count")
-		}
-		logrus.Infof("Use the default number of replicas %v", spec.NumberOfReplicas)
-	}
-
-	if string(spec.ReplicaAutoBalance) == "" {
-		spec.ReplicaAutoBalance = longhorn.ReplicaAutoBalanceIgnored
-		logrus.Infof("Use the %v to inherit global replicas auto-balance setting", spec.ReplicaAutoBalance)
-	}
-	if err := types.ValidateReplicaAutoBalance(spec.ReplicaAutoBalance); err != nil {
-		return nil, errors.Wrapf(err, "cannot create volume with replica auto-balance %v", spec.ReplicaAutoBalance)
-	}
-
-	if string(spec.DataLocality) == "" {
-		defaultDataLocality, err := m.GetSettingValueExisted(types.SettingNameDefaultDataLocality)
-		if err != nil {
-			return nil, errors.Wrapf(err, "cannot get valid mode for setting default data locality for volume: %v", name)
-		}
-		spec.DataLocality = longhorn.DataLocality(defaultDataLocality)
-	}
-	if err := types.ValidateDataLocality(spec.DataLocality); err != nil {
-		return nil, errors.Wrapf(err, "cannot create volume with data locality %v", spec.DataLocality)
-	}
-
-	if string(spec.AccessMode) == "" {
-		spec.AccessMode = longhorn.AccessModeReadWriteOnce
-	}
-
-	if spec.Migratable && spec.AccessMode != longhorn.AccessModeReadWriteMany {
-		return nil, fmt.Errorf("migratable volumes are only supported in ReadWriteMany (rwx) access mode")
-	}
-
 	defaultEngineImage, err := m.GetSettingValueExisted(types.SettingNameDefaultEngineImage)
 	if defaultEngineImage == "" {
 		return nil, fmt.Errorf("BUG: Invalid empty Setting.EngineImage")
-	}
-
-	// Check engine version before disable revision counter
-	if spec.RevisionCounterDisabled {
-		if ok, err := m.canDisableRevisionCounter(defaultEngineImage); !ok {
-			return nil, errors.Wrapf(err, "can not create volume with current engine image that doesn't support disable revision counter")
-		}
-	}
-
-	if !spec.Standby {
-		if spec.Frontend != longhorn.VolumeFrontendBlockDev && spec.Frontend != longhorn.VolumeFrontendISCSI {
-			return nil, fmt.Errorf("invalid volume frontend specified: %v", spec.Frontend)
-		}
-	}
-
-	if spec.BackingImage != "" {
-		if _, err := m.ds.GetBackingImage(spec.BackingImage); err != nil {
-			return nil, err
-		}
 	}
 
 	labels := map[string]string{}
@@ -1047,10 +984,6 @@ func (m *VolumeManager) UpdateReplicaCount(name string, count int) (v *longhorn.
 		err = errors.Wrapf(err, "unable to update replica count for volume %v", name)
 	}()
 
-	if err := types.ValidateReplicaCount(count); err != nil {
-		return nil, err
-	}
-
 	v, err = m.ds.GetVolume(name)
 	if err != nil {
 		return nil, err
@@ -1082,10 +1015,6 @@ func (m *VolumeManager) UpdateReplicaAutoBalance(name string, inputSpec longhorn
 		err = errors.Wrapf(err, "unable to update replica auto-balance for volume %v", name)
 	}()
 
-	if err = types.ValidateReplicaAutoBalance(inputSpec); err != nil {
-		return nil, err
-	}
-
 	v, err = m.ds.GetVolume(name)
 	if err != nil {
 		return nil, err
@@ -1111,10 +1040,6 @@ func (m *VolumeManager) UpdateDataLocality(name string, dataLocality longhorn.Da
 	defer func() {
 		err = errors.Wrapf(err, "unable to update data locality for volume %v", name)
 	}()
-
-	if err := types.ValidateDataLocality(dataLocality); err != nil {
-		return nil, err
-	}
 
 	v, err = m.ds.GetVolume(name)
 	if err != nil {
@@ -1142,10 +1067,6 @@ func (m *VolumeManager) UpdateAccessMode(name string, accessMode longhorn.Access
 		err = errors.Wrapf(err, "unable to update access mode for volume %v", name)
 	}()
 
-	if err := types.ValidateAccessMode(accessMode); err != nil {
-		return nil, err
-	}
-
 	v, err = m.ds.GetVolume(name)
 	if err != nil {
 		return nil, err
@@ -1169,16 +1090,4 @@ func (m *VolumeManager) UpdateAccessMode(name string, accessMode longhorn.Access
 
 	logrus.Infof("Updated volume %v access mode from %v to %v", v.Name, oldAccessMode, accessMode)
 	return v, nil
-}
-
-func (m *VolumeManager) canDisableRevisionCounter(engineImage string) (bool, error) {
-	cliAPIVersion, err := m.ds.GetEngineImageCLIAPIVersion(engineImage)
-	if err != nil {
-		return false, err
-	}
-	if cliAPIVersion < engineapi.CLIVersionFour {
-		return false, fmt.Errorf("current engine image version %v doesn't support disable revision counter", cliAPIVersion)
-	}
-
-	return true, nil
 }
