@@ -1341,9 +1341,6 @@ func GetOwnerReferencesForBackingImage(backingImage *longhorn.BackingImage) []me
 // CreateBackingImageManager creates a Longhorn BackingImageManager resource and verifies
 // creation
 func (s *DataStore) CreateBackingImageManager(backingImageManager *longhorn.BackingImageManager) (*longhorn.BackingImageManager, error) {
-	if err := initBackingImageManager(backingImageManager); err != nil {
-		return nil, err
-	}
 	if err := util.AddFinalizer(longhornFinalizerKey, backingImageManager); err != nil {
 		return nil, err
 	}
@@ -1374,13 +1371,6 @@ func (s *DataStore) CreateBackingImageManager(backingImageManager *longhorn.Back
 	}
 
 	return ret.DeepCopy(), nil
-}
-
-func initBackingImageManager(backingImageManager *longhorn.BackingImageManager) error {
-	if backingImageManager.Spec.BackingImages == nil {
-		backingImageManager.Spec.BackingImages = make(map[string]string, 0)
-	}
-	return nil
 }
 
 // UpdateBackingImageManager updates Longhorn BackingImageManager and verifies update
@@ -1548,9 +1538,6 @@ func GetOwnerReferencesForBackingImageManager(backingImageManager *longhorn.Back
 // CreateBackingImageDataSource creates a Longhorn BackingImageDataSource resource and verifies
 // creation
 func (s *DataStore) CreateBackingImageDataSource(backingImageDataSource *longhorn.BackingImageDataSource) (*longhorn.BackingImageDataSource, error) {
-	if err := initBackingImageDataSource(backingImageDataSource); err != nil {
-		return nil, err
-	}
 	if err := util.AddFinalizer(longhornFinalizerKey, backingImageDataSource); err != nil {
 		return nil, err
 	}
@@ -1574,13 +1561,6 @@ func (s *DataStore) CreateBackingImageDataSource(backingImageDataSource *longhor
 	}
 
 	return ret.DeepCopy(), nil
-}
-
-func initBackingImageDataSource(backingImageDataSource *longhorn.BackingImageDataSource) error {
-	if backingImageDataSource.Spec.Parameters == nil {
-		backingImageDataSource.Spec.Parameters = make(map[string]string, 0)
-	}
-	return nil
 }
 
 // UpdateBackingImageDataSource updates Longhorn BackingImageDataSource and verifies update
@@ -1728,9 +1708,6 @@ func GetOwnerReferencesForBackingImageDataSource(backingImageDataSource *longhor
 
 // CreateNode creates a Longhorn Node resource and verifies creation
 func (s *DataStore) CreateNode(node *longhorn.Node) (*longhorn.Node, error) {
-	if err := initNode(node); err != nil {
-		return nil, err
-	}
 	if err := util.AddFinalizer(longhornFinalizerKey, node); err != nil {
 		return nil, err
 	}
@@ -1754,26 +1731,6 @@ func (s *DataStore) CreateNode(node *longhorn.Node) (*longhorn.Node, error) {
 	}
 
 	return ret.DeepCopy(), nil
-}
-
-func initNode(node *longhorn.Node) error {
-	if node.Spec.Disks == nil {
-		node.Spec.Disks = make(map[string]longhorn.DiskSpec, 0)
-	}
-	for key, src := range node.Spec.Disks {
-		if src.Tags == nil {
-			dst := longhorn.DiskSpec{}
-			if err := copier.Copy(&dst, &src); err != nil {
-				return err
-			}
-			dst.Tags = []string{}
-			node.Spec.Disks[key] = dst
-		}
-	}
-	if node.Spec.Tags == nil {
-		node.Spec.Tags = []string{}
-	}
-	return nil
 }
 
 // CreateDefaultNode will create the default Disk at the value of the
@@ -3034,9 +2991,6 @@ func (s *DataStore) RemoveFinalizerForBackupVolume(backupVolume *longhorn.Backup
 
 // CreateBackup creates a Longhorn Backup CR and verifies creation
 func (s *DataStore) CreateBackup(backup *longhorn.Backup, backupVolumeName string) (*longhorn.Backup, error) {
-	if err := initBackup(backup); err != nil {
-		return nil, err
-	}
 	if err := tagBackupVolumeLabel(backupVolumeName, backup); err != nil {
 		return nil, err
 	}
@@ -3062,13 +3016,6 @@ func (s *DataStore) CreateBackup(backup *longhorn.Backup, backupVolumeName strin
 		return nil, fmt.Errorf("BUG: datastore: verifyCreation returned wrong type for Backup")
 	}
 	return ret.DeepCopy(), nil
-}
-
-func initBackup(backup *longhorn.Backup) error {
-	if backup.Spec.Labels == nil {
-		backup.Spec.Labels = make(map[string]string, 0)
-	}
-	return nil
 }
 
 // ListBackupsWithBackupVolumeName returns an object contains all backups in the cluster Backups CR
@@ -3197,16 +3144,6 @@ func (s *DataStore) CreateRecurringJob(recurringJob *longhorn.RecurringJob) (*lo
 	}
 
 	return ret.DeepCopy(), nil
-}
-
-func initRecurringJob(recurringJob *longhorn.RecurringJob) error {
-	if recurringJob.Spec.Groups == nil {
-		recurringJob.Spec.Groups = []string{}
-	}
-	if recurringJob.Spec.Labels == nil {
-		recurringJob.Spec.Labels = make(map[string]string, 0)
-	}
-	return nil
 }
 
 // ListRecurringJobs returns a map of RecurringJobPolicies indexed by name
