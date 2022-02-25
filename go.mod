@@ -32,7 +32,7 @@ require (
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f // indirect
 	github.com/docker/go-connections v0.3.0
 	github.com/golang/groupcache v0.0.0-20191002201903-404acd9df4cc // indirect
-	github.com/golang/protobuf v1.3.3-0.20190920234318-1680a479a2cf
+	github.com/golang/protobuf v1.4.3
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/handlers v1.4.2
 	github.com/gorilla/mux v1.7.3
@@ -54,11 +54,11 @@ require (
 	github.com/rancher/pkg v0.0.0-20181214184433-b04c0947ad2f // indirect
 	github.com/rancher/wrangler v0.8.10
 	github.com/robfig/cron v1.2.0
-	github.com/sirupsen/logrus v1.4.2
+	github.com/sirupsen/logrus v1.6.0
 	github.com/stretchr/testify v1.7.0
 	github.com/urfave/cli v1.22.1
 	golang.org/x/mod v0.5.1
-	golang.org/x/sys v0.0.0-20201119102817-f84b799fce68
+	golang.org/x/sys v0.0.0-20210603081109-ebe580a85c40
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
 	google.golang.org/grpc v1.26.0
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f

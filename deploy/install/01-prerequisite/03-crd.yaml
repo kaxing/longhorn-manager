@@ -1801,6 +1801,7 @@ spec:
                   type: object
                 type: object
               engineManagerCPURequest:
+                exclusiveMinimum: true
                 minimum: 0
                 type: integer
               evictionRequested:
@@ -1808,6 +1809,7 @@ spec:
               name:
                 type: string
               replicaManagerCPURequest:
+                exclusiveMinimum: true
                 minimum: 0
                 type: integer
               tags:

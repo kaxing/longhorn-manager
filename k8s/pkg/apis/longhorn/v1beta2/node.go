@@ -73,9 +73,11 @@ type NodeSpec struct {
 	EvictionRequested bool `json:"evictionRequested"`
 	// +optional
 	Tags []string `json:"tags"`
+	// +kubebuilder:validation:ExclusiveMinimum=true
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	EngineManagerCPURequest int `json:"engineManagerCPURequest"`
+	// +kubebuilder:validation:ExclusiveMinimum=true
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	ReplicaManagerCPURequest int `json:"replicaManagerCPURequest"`
