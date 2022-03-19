@@ -3149,6 +3149,79 @@ func (s *DataStore) RemoveFinalizerForBackup(backup *longhorn.Backup) error {
 	return nil
 }
 
+// GetHousekeepingRO returns the Housekeeping with the given housekeeping name in the cluster
+func (s *DataStore) GetHousekeepingRO(housekeepingName string) (*longhorn.Housekeeping, error) {
+	return s.hLister.Housekeepings(s.namespace).Get(housekeepingName)
+}
+
+// GetHousekeeping returns a copy of Housekeeping with the given housekeeping name in the cluster
+func (s *DataStore) GetHousekeeping(name string) (*longhorn.Housekeeping, error) {
+	resultRO, err := s.GetHousekeepingRO(name)
+	if err != nil {
+		return nil, err
+	}
+	// Cannot use cached object from lister
+	return resultRO.DeepCopy(), nil
+}
+
+// UpdateHousekeeping updates the given Longhorn housekeeping in the cluster Housekeeping CR and verifies update
+func (s *DataStore) UpdateHousekeeping(housekeeping *longhorn.Housekeeping) (*longhorn.Housekeeping, error) {
+	obj, err := s.lhClient.LonghornV1beta2().Housekeepings(s.namespace).Update(context.TODO(), housekeeping, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, err
+	}
+	verifyUpdate(housekeeping.Name, obj, func(name string) (runtime.Object, error) {
+		return s.GetHousekeepingRO(name)
+	})
+	return obj, nil
+}
+
+// UpdateHousekeepingStatus updates the given Longhorn housekeeping status in the cluster Housekeepings CR status and verifies update
+func (s *DataStore) UpdateHousekeepingStatus(housekeeping *longhorn.Housekeeping) (*longhorn.Housekeeping, error) {
+	obj, err := s.lhClient.LonghornV1beta2().Housekeepings(s.namespace).UpdateStatus(context.TODO(), housekeeping, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, err
+	}
+	verifyUpdate(housekeeping.Name, obj, func(name string) (runtime.Object, error) {
+		return s.GetHousekeepingRO(name)
+	})
+	return obj, nil
+}
+
+// RemoveFinalizerForHousekeeping will result in deletion if DeletionTimestamp was set
+func (s *DataStore) RemoveFinalizerForHousekeeping(housekeeping *longhorn.Housekeeping) error {
+	if !util.FinalizerExists(longhornFinalizerKey, housekeeping) {
+		// finalizer already removed
+		return nil
+	}
+	if err := util.RemoveFinalizer(longhornFinalizerKey, housekeeping); err != nil {
+		return err
+	}
+	_, err := s.lhClient.LonghornV1beta2().Housekeepings(s.namespace).Update(context.TODO(), housekeeping, metav1.UpdateOptions{})
+	if err != nil {
+		// workaround `StorageError: invalid object, Code: 4` due to empty object
+		if housekeeping.DeletionTimestamp != nil {
+			return nil
+		}
+		return errors.Wrapf(err, "unable to remove finalizer for housekeeping %s", housekeeping.Name)
+	}
+	return nil
+}
+
+// ListHousekeepings returns an object contains all housekeepings in the cluster Housekeepings CR
+func (s *DataStore) ListHousekeepings() (map[string]*longhorn.Housekeeping, error) {
+	list, err := s.hLister.Housekeepings(s.namespace).List(labels.Everything())
+	if err != nil {
+		return nil, err
+	}
+
+	itemMap := map[string]*longhorn.Housekeeping{}
+	for _, itemRO := range list {
+		itemMap[itemRO.Name] = itemRO.DeepCopy()
+	}
+	return itemMap, nil
+}
+
 // CreateRecurringJob creates a Longhorn RecurringJob resource and verifies
 // creation
 func (s *DataStore) CreateRecurringJob(recurringJob *longhorn.RecurringJob) (*longhorn.RecurringJob, error) {

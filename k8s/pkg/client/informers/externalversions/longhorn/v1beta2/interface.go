@@ -40,6 +40,8 @@ type Interface interface {
 	Engines() EngineInformer
 	// EngineImages returns a EngineImageInformer.
 	EngineImages() EngineImageInformer
+	// Housekeepings returns a HousekeepingInformer.
+	Housekeepings() HousekeepingInformer
 	// InstanceManagers returns a InstanceManagerInformer.
 	InstanceManagers() InstanceManagerInformer
 	// Nodes returns a NodeInformer.
@@ -105,6 +107,11 @@ func (v *version) Engines() EngineInformer {
 // EngineImages returns a EngineImageInformer.
 func (v *version) EngineImages() EngineImageInformer {
 	return &engineImageInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// Housekeepings returns a HousekeepingInformer.
+func (v *version) Housekeepings() HousekeepingInformer {
+	return &housekeepingInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // InstanceManagers returns a InstanceManagerInformer.

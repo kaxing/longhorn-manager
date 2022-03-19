@@ -59,6 +59,8 @@ type DataStore struct {
 	BackupInformer                 cache.SharedInformer
 	rjLister                       lhlisters.RecurringJobLister
 	RecurringJobInformer           cache.SharedInformer
+	hLister                        lhlisters.HousekeepingLister
+	HousekeepingInformer           cache.SharedInformer
 
 	kubeClient                    clientset.Interface
 	pLister                       corelisters.PodLister
@@ -131,6 +133,8 @@ func NewDataStore(
 	cacheSyncs = append(cacheSyncs, bInformer.Informer().HasSynced)
 	rjInformer := lhInformerFactory.Longhorn().V1beta2().RecurringJobs()
 	cacheSyncs = append(cacheSyncs, rjInformer.Informer().HasSynced)
+	hInformer := lhInformerFactory.Longhorn().V1beta2().Housekeepings()
+	cacheSyncs = append(cacheSyncs, hInformer.Informer().HasSynced)
 
 	podInformer := kubeInformerFactory.Core().V1().Pods()
 	cacheSyncs = append(cacheSyncs, podInformer.Informer().HasSynced)
@@ -197,6 +201,8 @@ func NewDataStore(
 		BackupInformer:                 bInformer.Informer(),
 		rjLister:                       rjInformer.Lister(),
 		RecurringJobInformer:           rjInformer.Informer(),
+		hLister:                        hInformer.Lister(),
+		HousekeepingInformer:           hInformer.Informer(),
 
 		kubeClient:                    kubeClient,
 		pLister:                       podInformer.Lister(),

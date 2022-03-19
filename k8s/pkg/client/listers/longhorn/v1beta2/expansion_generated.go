@@ -82,6 +82,14 @@ type EngineImageListerExpansion interface{}
 // EngineImageNamespaceLister.
 type EngineImageNamespaceListerExpansion interface{}
 
+// HousekeepingListerExpansion allows custom methods to be added to
+// HousekeepingLister.
+type HousekeepingListerExpansion interface{}
+
+// HousekeepingNamespaceListerExpansion allows custom methods to be added to
+// HousekeepingNamespaceLister.
+type HousekeepingNamespaceListerExpansion interface{}
+
 // InstanceManagerListerExpansion allows custom methods to be added to
 // InstanceManagerLister.
 type InstanceManagerListerExpansion interface{}

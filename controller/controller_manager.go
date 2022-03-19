@@ -81,6 +81,7 @@ func StartControllers(logger logrus.FieldLogger, stopCh chan struct{}, controlle
 	btc := NewBackupTargetController(logger, ds, scheme, kubeClient, controllerID, namespace)
 	bvc := NewBackupVolumeController(logger, ds, scheme, kubeClient, controllerID, namespace)
 	bc := NewBackupController(logger, ds, scheme, kubeClient, controllerID, namespace)
+	hc := NewHousekeepingController(logger, ds, scheme, kubeClient, controllerID, namespace)
 	imc := NewInstanceManagerController(logger, ds, scheme, kubeClient, namespace, controllerID, serviceAccount)
 	smc := NewShareManagerController(logger, ds, scheme, kubeClient, namespace, controllerID, serviceAccount)
 	bic := NewBackingImageController(logger, ds, scheme, kubeClient, namespace, controllerID, serviceAccount)
@@ -114,6 +115,7 @@ func StartControllers(logger logrus.FieldLogger, stopCh chan struct{}, controlle
 	go bvc.Run(Workers, stopCh)
 	go bc.Run(Workers, stopCh)
 	go rjc.Run(Workers, stopCh)
+	go hc.Run(Workers, stopCh)
 
 	go kpvc.Run(Workers, stopCh)
 	go knc.Run(Workers, stopCh)
