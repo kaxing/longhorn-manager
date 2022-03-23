@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"time"
 
@@ -431,6 +432,10 @@ func (nc *NodeController) syncNode(key string) (err error) {
 	if err := nc.syncDiskStatus(node); err != nil {
 		return err
 	}
+	// sync orphaned replicas on current node
+	if err := nc.syncOrphanedReplicaStatus(node); err != nil {
+		return err
+	}
 	// sync mount propagation status on current node
 	for _, pod := range managerPods {
 		if pod.Spec.NodeName == node.Name {
@@ -554,6 +559,40 @@ func (nc *NodeController) getDiskInfoMap(node *longhorn.Node) map[string]*diskIn
 		}
 	}
 	return result
+}
+
+func contains(array []string, item string) int {
+	for i, check := range array {
+		if check == item {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func (nc *NodeController) getReplicaOnDisks(node *longhorn.Node) (map[string][]string, error) {
+	result := map[string][]string{}
+
+	for _, disk := range node.Spec.Disks {
+		replicas, err := util.GetReplicaList(filepath.Join(disk.Path, "replicas"))
+		if err != nil {
+			return nil, err
+		}
+
+		for _, replica := range replicas {
+			disks, exist := result[replica]
+			if !exist {
+				disks = make([]string, 0)
+			}
+			if i := contains(disks, disk.Path); i < 0 {
+				disks = append(disks, disk.Path)
+				result[replica] = disks
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // Check all disks in the same filesystem ID are in ready status
@@ -1020,4 +1059,32 @@ func BackingImageDiskFileCleanup(node *longhorn.Node, bi *longhorn.BackingImage,
 		logrus.Debugf("Start to cleanup the unused file in disk %v for backing image %v", diskUUID, bi.Name)
 		delete(bi.Spec.Disks, diskUUID)
 	}
+}
+
+func (nc *NodeController) syncOrphanedReplicaStatus(node *longhorn.Node) error {
+	replicas, err := nc.getReplicaOnDisks(node)
+	if err != nil {
+		return err
+	}
+
+	activeReplicas, err := nc.ds.ListReplicasByNodeRO(node.Name)
+	if err != nil {
+		return err
+	}
+
+	// Find out the orphaned replicas
+	for _, r := range activeReplicas {
+		volume := r.Labels[types.LonghornLabelVolume]
+
+		disks, exist := replicas[volume]
+		if !exist {
+			continue
+		}
+
+		if i := contains(disks, r.Spec.DiskPath); i >= 0 {
+			newDisks := append(disks[:i], disks[i+1:]...)
+			replicas[volume] = newDisks
+		}
+	}
+	return nil
 }

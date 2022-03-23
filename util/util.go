@@ -436,6 +436,25 @@ func GetDiskInfo(directory string) (info *DiskInfo, err error) {
 	return diskInfo, nil
 }
 
+func GetReplicaList(directory string) (replicas []string, err error) {
+	defer func() {
+		err = errors.Wrapf(err, "cannot list replicas in the directory %v", directory)
+	}()
+	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
+	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
+	output, err := Execute([]string{}, "nsenter", mountPath, "ls", directory)
+	if err != nil {
+		return nil, err
+	}
+
+	replicas = strings.Split(output, "\n")
+	if len(replicas[len(replicas)-1]) == 0 {
+		replicas = replicas[:len(replicas)-1]
+	}
+
+	return replicas, nil
+}
+
 func RetryOnConflictCause(fn func() (interface{}, error)) (interface{}, error) {
 	return RetryOnErrorCondition(fn, apierrors.IsConflict)
 }

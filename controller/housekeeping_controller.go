@@ -21,6 +21,7 @@ import (
 	"k8s.io/kubernetes/pkg/controller"
 
 	"github.com/longhorn/longhorn-manager/datastore"
+	"github.com/longhorn/longhorn-manager/types"
 
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 )
@@ -80,8 +81,14 @@ func NewHousekeepingController(
 	}
 
 	ds.HousekeepingInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    hc.enqueueHousekeeping,
-		UpdateFunc: func(old, cur interface{}) { hc.enqueueHousekeeping(cur) },
+		AddFunc: func(cur interface{}) {
+			logrus.Info("Add")
+			hc.enqueueHousekeeping(cur)
+		},
+		UpdateFunc: func(old, cur interface{}) {
+			logrus.Info("Update")
+			hc.enqueueHousekeeping(cur)
+		},
 		DeleteFunc: hc.enqueueHousekeeping,
 	})
 
@@ -199,19 +206,20 @@ func (hc *HousekeepingController) reconcile(housekeepingName string) (err error)
 	if !hc.isResponsibleFor(housekeeping) {
 		return nil
 	}
+	/*
 
-	if housekeeping.Status.OwnerID != hc.controllerID {
-		housekeeping.Status.OwnerID = hc.controllerID
-		housekeeping, err = hc.ds.UpdateHousekeepingStatus(housekeeping)
-		if err != nil {
-			// we don't mind others coming first
-			if apierrors.IsConflict(errors.Cause(err)) {
-				return nil
+		if housekeeping.Status.OwnerID != hc.controllerID {
+			housekeeping.Status.OwnerID = hc.controllerID
+			housekeeping, err = hc.ds.UpdateHousekeepingStatus(housekeeping)
+			if err != nil {
+				// we don't mind others coming first
+				if apierrors.IsConflict(errors.Cause(err)) {
+					return nil
+				}
+				return err
 			}
-			return err
 		}
-	}
-
+	*/
 	log := getLoggerForHousekeeping(hc.logger, housekeeping)
 
 	// Examine DeletionTimestamp to determine if object is under deletion
@@ -234,8 +242,8 @@ func (hc *HousekeepingController) reconcile(housekeepingName string) (err error)
 		}
 	}()
 
-	if housekeeping.Status.LastSyncedAt.IsZero() {
-	}
+	//if housekeeping.Status.LastSyncedAt.IsZero() {
+	//}
 
 	// The housekeeping config had synced
 	if !housekeeping.Status.LastSyncedAt.IsZero() &&
@@ -244,6 +252,80 @@ func (hc *HousekeepingController) reconcile(housekeepingName string) (err error)
 	}
 
 	// TODO: Update Hosekeeping CR status
+	defaultInstanceManagerImage, err := hc.ds.GetSettingValueExisted(types.SettingNameDefaultInstanceManagerImage)
+	if err != nil {
+		return err
+	}
+
+	nodes, err := hc.ds.ListNodesRO()
+	if err != nil {
+		hc.logger.WithError(err).Warnf("failed to list nodes")
+	}
+	for _, node := range nodes {
+		logrus.Infof("Debug ===> node=%v", node.Name)
+
+		//volumesOnDisk := map[string][]string{}
+
+		ims, err := hc.ds.ListInstanceManagersBySelector(node.Name, defaultInstanceManagerImage, longhorn.InstanceManagerTypeEngine)
+		if err != nil {
+			continue
+		}
+
+		// TODO: handle len(ims) > 1
+		logrus.Infof("Debug ==> ims=%+v", ims)
+
+		/*
+			for _, im := range ims {
+				c, err := engineapi.NewInstanceManagerClient(im)
+				if err != nil {
+					continue
+				}
+
+				c.
+
+
+			}
+		*/
+
+		//im := ims[0]
+
+		/*
+			disks := node.Spec.Disks
+			logrus.Infof("Debug ===> nodeID=%v, disks=+%v", nodeID, disks)
+		*/
+		/*
+			client, err := GetClientForEngine(e, &engineapi.EngineCollection{}, e.Status.CurrentImage)
+			if err != nil {
+				hc.logger.WithError(err).Warnf("failed to get client of engine %v", e.Name)
+				continue
+			}
+		*/
+		/*
+			replicaURLModeMap, err := client.ReplicaList()
+			if err != nil {
+				hc.logger.WithError(err).Warnf("failed to list replica of engine %v", e.Name)
+				continue
+			}
+		*/
+		_, err = hc.ds.UpdateHousekeepingStatus(housekeeping)
+		if err != nil {
+			hc.logger.WithError(err).Warnf("failed to UpdateHousekeepingStatus since %v", err)
+			return err
+		}
+
+		activeReplicas, err := hc.ds.ListReplicasByNodeRO(node.Name)
+		if err != nil {
+			hc.logger.WithError(err).Warnf("failed to list replicas on node %v since %v", node.Name, err)
+			continue
+		}
+		/*
+			for _, r := range activeReplicas {
+
+				logrus.Infof("Debug ===> r=%+%v", r)
+			}
+		*/
+		logrus.Infof("Debug ===> nodeID=%v, activeReplicas=+%v", node.Name, activeReplicas)
+	}
 	logrus.Infof("Debug ===> finish")
 	return nil
 }
