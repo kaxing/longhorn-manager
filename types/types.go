@@ -91,6 +91,7 @@ const (
 	LonghornLabelBackupVolume             = "backup-volume"
 	LonghornLabelRecurringJob             = "job"
 	LonghornLabelRecurringJobGroup        = "job-group"
+	LonghornLabelOrphan                   = "orphan"
 	LonghornLabelCRDAPIVersion            = "crd-api-version"
 
 	LonghornLabelValueEnabled = "enabled"
@@ -397,6 +398,15 @@ func GetRecurringJobLabelValueMap(labelType, recurringJobName string) map[string
 		GetRecurringJobLabelKey(labelType, recurringJobName): LonghornLabelValueEnabled,
 	}
 }
+
+func GetOrphanLabels(node, diskUUID, orphanName string) map[string]string {
+	labels := GetBaseLabelsForSystemManagedComponent()
+	labels[GetLonghornLabelComponentKey()] = LonghornLabelOrphan
+	labels[GetLonghornLabelKey(LonghornLabelNode)] = node
+	labels[GetLonghornLabelKey(LonghornLabelDiskUUID)] = diskUUID
+	return labels
+}
+
 func GetRegionAndZone(labels map[string]string) (string, string) {
 	region := ""
 	zone := ""
