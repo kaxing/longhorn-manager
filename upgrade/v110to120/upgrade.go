@@ -205,7 +205,7 @@ func (run *recurringJobUpgrade) translateStorageClassRecurringJobs() (err error)
 			Concurrency: types.DefaultRecurringJobConcurrency,
 			Labels:      recurringJob.Labels,
 		}
-		if !util.Contains(recurringJobIDs, id) {
+		if _, ok := util.Contains(recurringJobIDs, id); !ok {
 			recurringJobIDs = append(recurringJobIDs, id)
 		}
 	}
@@ -244,7 +244,7 @@ func (run *recurringJobUpgrade) convertToSelectors(recurringJobIDs []string) (er
 		}
 	}
 	for _, id := range recurringJobIDs {
-		if util.Contains(selectorIDs, id) {
+		if _, ok := util.Contains(selectorIDs, id); ok {
 			continue
 		}
 		selectors = append(selectors, recurringJobSelector{

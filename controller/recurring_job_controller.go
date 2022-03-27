@@ -257,7 +257,7 @@ func (control *RecurringJobController) cleanupVolumeRecurringJob(recurringJob *l
 			if checkRecurringJob.Name == recurringJob.Name {
 				continue
 			}
-			if util.Contains(checkRecurringJob.Spec.Groups, group) {
+			if _, ok := util.Contains(checkRecurringJob.Spec.Groups, group); ok {
 				inUse = true
 				break
 			}
@@ -276,7 +276,7 @@ func (control *RecurringJobController) cleanupVolumeRecurringJob(recurringJob *l
 		jobs := datastore.MarshalLabelToVolumeRecurringJob(vol.Labels)
 		for jobName, job := range jobs {
 			if job.IsGroup {
-				if !util.Contains(rmGroups, jobName) {
+				if _, ok := util.Contains(rmGroups, jobName); !ok {
 					continue
 				}
 				control.logger.Debugf("Clean up volume recurring job-group %v for %v", jobName, vol.Name)

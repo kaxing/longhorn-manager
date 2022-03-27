@@ -1687,7 +1687,10 @@ func (vc *VolumeController) getReplicaCountForAutoBalanceLeastEffort(v *longhorn
 		string(longhorn.ReplicaAutoBalanceLeastEffort),
 		string(longhorn.ReplicaAutoBalanceBestEffort),
 	}
-	if err != nil || !util.Contains(enabled, string(setting)) {
+	if err != nil {
+		return 0
+	}
+	if _, ok := util.Contains(enabled, string(setting)); !ok {
 		return 0
 	}
 
@@ -1810,7 +1813,7 @@ func (vc *VolumeController) getReplicaCountForAutoBalanceZone(v *longhorn.Volume
 			zoneExtraRs[nZone] = []string{}
 			usedZones = append(usedZones, nZone)
 		}
-		if !util.Contains(usedNodes, r.Spec.NodeID) {
+		if _, ok := util.Contains(usedNodes, r.Spec.NodeID); !ok {
 			usedNodes = append(usedNodes, r.Spec.NodeID)
 		}
 	}
@@ -1828,12 +1831,12 @@ func (vc *VolumeController) getReplicaCountForAutoBalanceZone(v *longhorn.Volume
 
 	unusedZone := make(map[string][]string)
 	for nodeName, node := range readyNodes {
-		if util.Contains(usedZones, node.Status.Zone) {
+		if _, ok := util.Contains(usedZones, node.Status.Zone); ok {
 			// cannot use node in zone because have running replica
 			continue
 		}
 
-		if util.Contains(usedNodes, nodeName) {
+		if _, ok := util.Contains(usedNodes, nodeName); ok {
 			// cannot use node because have running replica
 			continue
 		}

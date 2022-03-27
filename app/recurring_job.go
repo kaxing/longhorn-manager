@@ -862,7 +862,7 @@ func filterVolumesForJob(allowDetached bool, volumes []longhorn.Volume, filterNa
 	logger := logrus.StandardLogger()
 	for _, volume := range volumes {
 		// skip duplicates
-		if util.Contains(*filterNames, volume.Name) {
+		if _, ok := util.Contains(*filterNames, volume.Name); ok {
 			continue
 		}
 		if volume.Status.Robustness != longhorn.VolumeRobustnessFaulted &&
