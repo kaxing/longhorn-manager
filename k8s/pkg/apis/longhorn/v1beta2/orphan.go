@@ -5,7 +5,7 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type OrphanType string
 
 const (
-	OrphanTypeReplica = OrphanType("replica")
+	OrphanTypeReplicaDirectory = OrphanType("replica directory")
 )
 
 const (
@@ -51,8 +51,8 @@ type OrphanStatus struct {
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`,description="The type of the orphan"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeID`,description="The node that the orphan is on"
-// +kubebuilder:printcolumn:name="Disk",type=string,JSONPath=`.status.conditions[?(@.type=='DiskPath')].status`,description="The disk that the orphan is on"
-// +kubebuilder:printcolumn:name="File",type=string,JSONPath=`.status.conditions[?(@.type=='OrphanFileName')].status`,description="The current file or directory name of the orphan"
+// +kubebuilder:printcolumn:name="Disk",type=string,JSONPath=`.spec.parameters['DiskPath']`,description="The disk that the orphan is on"
+// +kubebuilder:printcolumn:name="File",type=string,JSONPath=`.spec.parameters['OrphanFileName']`,description="The current file or directory name of the orphan"
 // Orphan is where Longhorn stores orphan object.
 type Orphan struct {
 	metav1.TypeMeta   `json:",inline"`

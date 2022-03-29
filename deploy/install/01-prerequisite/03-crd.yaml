@@ -1943,11 +1943,11 @@ spec:
       name: Node
       type: string
     - description: The disk that the orphan is on
-      jsonPath: .status.conditions[?(@.type=='DiskPath')].status
+      jsonPath: .spec.parameters['DiskPath']
       name: Disk
       type: string
     - description: The current file or directory name of the orphan
-      jsonPath: .status.conditions[?(@.type=='OrphanFileName')].status
+      jsonPath: .spec.parameters['OrphanFileName']
       name: File
       type: string
     name: v1beta2
