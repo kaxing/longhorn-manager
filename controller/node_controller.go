@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/kubernetes/pkg/controller"
 
+	monitor "github.com/longhorn/longhorn-manager/controller/monitor"
 	"github.com/longhorn/longhorn-manager/datastore"
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 	"github.com/longhorn/longhorn-manager/scheduler"
@@ -38,6 +39,8 @@ type NodeController struct {
 
 	kubeClient    clientset.Interface
 	eventRecorder record.EventRecorder
+
+	monitor *monitor.NodeMonitor
 
 	ds *datastore.DataStore
 
@@ -425,6 +428,15 @@ func (nc *NodeController) syncNode(key string) (err error) {
 
 	if nc.controllerID != node.Name {
 		return nil
+	}
+
+	mon, err := nc.checkMonitor(node)
+	if err != nil {
+		return err
+	}
+
+	if err = nc.syncOrphanedReplicaDirectories(node, mon); err != nil {
+		return err
 	}
 
 	// sync disks status on current node
@@ -1020,4 +1032,91 @@ func BackingImageDiskFileCleanup(node *longhorn.Node, bi *longhorn.BackingImage,
 		logrus.Debugf("Start to cleanup the unused file in disk %v for backing image %v", diskUUID, bi.Name)
 		delete(bi.Spec.Disks, diskUUID)
 	}
+}
+
+func (nc *NodeController) checkMonitor(node *longhorn.Node) (*monitor.NodeMonitor, error) {
+	if node == nil {
+		return nil, nil
+	}
+
+	if nc.monitor != nil {
+		return nc.monitor, nil
+	}
+
+	monitor, err := monitor.NewNodeMonitor(nc.logger, nc.ds, node, nc.enqueueNodeForMonitor)
+	if err != nil {
+		return nil, err
+	}
+
+	nc.monitor = monitor
+	return monitor, nil
+}
+
+func (nc *NodeController) enqueueNodeForMonitor(key string) {
+	nc.queue.Add(key)
+}
+
+func (nc *NodeController) syncOrphanedReplicaDirectories(node *longhorn.Node, monitor *monitor.NodeMonitor) error {
+	updateNode := monitor.GetNode()
+
+	if !reflect.DeepEqual(node.Spec.Disks, updateNode.Spec.Disks) {
+		logrus.Warnf("Node %v disks are changed, skip the update", node.Name)
+		return nil
+	}
+
+	logrus.Infof("Update node %v disk status", node.Name)
+	node.Status.DiskStatus = updateNode.Status.DiskStatus
+
+	if err := nc.createOrphans(node); err != nil {
+		logrus.Infof("unable to create orphan resources since %v", err.Error())
+		return err
+	}
+
+	return nil
+}
+
+func (nc *NodeController) createOrphans(node *longhorn.Node) error {
+	for fsid, status := range node.Status.DiskStatus {
+		for replicaDirectoryName := range status.OrphanedReplicaDirectoryNames {
+			if err := nc.createOrphan(node, replicaDirectoryName, fsid); err != nil {
+				logrus.Errorf("unable to create orphan for orphaned replica directory %v in disk %v on node %v since %v",
+					replicaDirectoryName, node.Spec.Disks[fsid].Path, node.Name, err.Error())
+				// If the orphan CR cannot be created successfully, then remove the replica directory name
+				// from OrphanedReplicaDirectoryNames. Next scan of orphaned replica directories will add
+				// it back and retry to create a CR.
+				delete(status.OrphanedReplicaDirectoryNames, replicaDirectoryName)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName, fsid string) error {
+	orphanName := types.GetOrphanChecksumName(fmt.Sprintf("%s-%s-%s", replicaDirectoryName, fsid, node.Name))
+
+	_, err := nc.ds.GetOrphanRO(orphanName)
+	if err == nil || (err != nil && !apierrors.IsNotFound(err)) {
+		return err
+	}
+
+	orphan := &longhorn.Orphan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: orphanName,
+		},
+		Spec: longhorn.OrphanSpec{
+			NodeID: node.Name,
+			Type:   longhorn.OrphanTypeReplicaDirectory,
+			Parameters: map[string]string{
+				longhorn.OrphanFileName: replicaDirectoryName,
+				longhorn.OrphanDiskFsid: fsid,
+				longhorn.OrphanDiskUUID: node.Status.DiskStatus[fsid].DiskUUID,
+				longhorn.OrphanDiskPath: node.Spec.Disks[fsid].Path,
+			},
+		},
+	}
+
+	_, err = nc.ds.CreateOrphan(orphan)
+
+	return err
 }
