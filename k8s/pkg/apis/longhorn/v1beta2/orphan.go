@@ -5,11 +5,18 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type OrphanType string
 
 const (
-	OrphanTypeNew = OrphanType("replica")
+	OrphanTypeReplica = OrphanType("replica")
 )
 
 const (
 	OrphanConditionTypeDeletable = "Deletable"
+)
+
+const (
+	OrphanFileName = "Name"
+	OrphanDiskFsid = "DiskFsid"
+	OrphanDiskUUID = "DiskUUID"
+	OrphanDiskPath = "DiskPath"
 )
 
 // OrphanSpec defines the desired state of the Longhorn orphaned data
@@ -22,18 +29,16 @@ type OrphanSpec struct {
 	// +optional
 	Type OrphanType `json:"type"`
 
-	// The directory or file name of the orphaned data
+	// The parameters of the orphaned data
 	// +optional
-	Name string `json:"fileName"`
-
-	// +optional
-	DiskUUID string `json:"diskUUID"`
-	// +optional
-	DiskPath string `json:"diskPath"`
+	// +nullable
+	Parameters map[string]string `json:"parameters"`
 }
 
 // OrphanStatus defines the observed state of the Longhorn orphaned data
 type OrphanStatus struct {
+	// +optional
+	OwnerID string `json:"OwnerID"`
 	// +optional
 	// +nullable
 	Conditions []Condition `json:"conditions"`
@@ -46,9 +51,8 @@ type OrphanStatus struct {
 // +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`,description="The type of the orphan"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeID`,description="The node that the orphan is on"
-// +kubebuilder:printcolumn:name="File",type=string,JSONPath=`.spec.fileName`,description="The current file or directory name of the orphan"
-// +kubebuilder:printcolumn:name="Disk",type=string,JSONPath=`.spec.diskPath`,description="The disk that the orphan is on"
-
+// +kubebuilder:printcolumn:name="Disk",type=string,JSONPath=`.status.conditions[?(@.type=='DiskPath')].status`,description="The disk that the orphan is on"
+// +kubebuilder:printcolumn:name="File",type=string,JSONPath=`.status.conditions[?(@.type=='OrphanFileName')].status`,description="The current file or directory name of the orphan"
 // Orphan is where Longhorn stores orphan object.
 type Orphan struct {
 	metav1.TypeMeta   `json:",inline"`

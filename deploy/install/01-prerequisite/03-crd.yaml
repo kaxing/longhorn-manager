@@ -1874,6 +1874,10 @@ spec:
                       type: array
                     diskUUID:
                       type: string
+                    orphanedReplicaDirectoryNames:
+                      additionalProperties:
+                        type: string
+                      type: object
                     scheduledReplica:
                       additionalProperties:
                         format: int64
@@ -1938,13 +1942,13 @@ spec:
       jsonPath: .spec.nodeID
       name: Node
       type: string
-    - description: The current file or directory name of the orphan
-      jsonPath: .spec.fileName
-      name: File
-      type: string
     - description: The disk that the orphan is on
-      jsonPath: .spec.diskPath
+      jsonPath: .status.conditions[?(@.type=='DiskPath')].status
       name: Disk
+      type: string
+    - description: The current file or directory name of the orphan
+      jsonPath: .status.conditions[?(@.type=='OrphanFileName')].status
+      name: File
       type: string
     name: v1beta2
     schema:
@@ -1962,16 +1966,15 @@ spec:
           spec:
             description: OrphanSpec defines the desired state of the Longhorn orphaned data
             properties:
-              diskPath:
-                type: string
-              diskUUID:
-                type: string
-              fileName:
-                description: The directory or file name of the orphaned data
-                type: string
               nodeID:
                 description: The node ID on which the controller is responsible to reconcile this orphan CR.
                 type: string
+              parameters:
+                additionalProperties:
+                  type: string
+                description: The parameters of the orphaned data
+                nullable: true
+                type: object
               type:
                 description: The type of the orphaned data. Can be "replica".
                 type: string
@@ -1979,6 +1982,8 @@ spec:
           status:
             description: OrphanStatus defines the observed state of the Longhorn orphaned data
             properties:
+              OwnerID:
+                type: string
               conditions:
                 items:
                   properties:
