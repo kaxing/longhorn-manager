@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
@@ -397,6 +398,15 @@ func GetChecksumSHA512(data []byte) string {
 	return hex.EncodeToString(checksum[:])
 }
 
+func GetStringChecksumSHA256(data string) string {
+	return GetChecksumSHA256([]byte(data))
+}
+
+func GetChecksumSHA256(data []byte) string {
+	checksum := sha256.Sum256(data)
+	return hex.EncodeToString(checksum[:])
+}
+
 func GetStringHash(data string) string {
 	hash := fnv.New32a()
 	hash.Write([]byte(data))
@@ -788,7 +798,55 @@ func Contains(list []string, item string) (int, bool) {
 	return -1, false
 }
 
-		}
+/*
+func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames []string, err error) {
+	defer func() {
+		err = errors.Wrapf(err, "cannot list replica directories in the disk %v", diskPath)
+	}()
+
+	replicaDirectoryNames = make([]string, 0)
+
+	directory := filepath.Join(diskPath, "replicas")
+
+	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
+	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
+	output, err := Execute([]string{}, "nsenter", mountPath, "ls", directory)
+	if err != nil {
+		return replicaDirectoryNames, err
 	}
-	return false
+
+	names := strings.Split(output, "\n")
+	if len(names[len(names)-1]) == 0 {
+		names = names[:len(names)-1]
+	}
+
+	return names, nil
+}
+*/
+
+func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string]string, err error) {
+	defer func() {
+		err = errors.Wrapf(err, "cannot list replica directories in the disk %v", diskPath)
+	}()
+
+	replicaDirectoryNames = make(map[string]string, 0)
+
+	directory := filepath.Join(diskPath, "replicas")
+
+	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
+	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
+	output, err := Execute([]string{}, "nsenter", mountPath, "ls", directory)
+	if err != nil {
+		return replicaDirectoryNames, err
+	}
+
+	names := strings.Split(output, "\n")
+	for _, name := range names {
+		if len(name) == 0 {
+			continue
+		}
+		replicaDirectoryNames[name] = ""
+	}
+
+	return replicaDirectoryNames, nil
 }

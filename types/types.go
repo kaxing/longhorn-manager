@@ -172,6 +172,7 @@ const (
 	engineImagePrefix          = "ei-"
 	instanceManagerImagePrefix = "imi-"
 	shareManagerImagePrefix    = "smi-"
+	orphanPrefix               = "orphan-"
 
 	BackingImageDataSourcePodNamePrefix = "backing-image-ds-"
 
@@ -429,6 +430,10 @@ func GetInstanceManagerImageChecksumName(image string) string {
 
 func GetShareManagerImageChecksumName(image string) string {
 	return shareManagerImagePrefix + util.GetStringChecksum(strings.TrimSpace(image))[:ImageChecksumNameLength]
+}
+
+func GetOrphanChecksumName(name string) string {
+	return orphanPrefix + util.GetStringChecksumSHA256(strings.TrimSpace(name))
 }
 
 func GetShareManagerPodNameFromShareManagerName(smName string) string {

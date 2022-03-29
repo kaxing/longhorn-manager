@@ -3297,6 +3297,30 @@ func ValidateRecurringJobs(jobs []longhorn.RecurringJobSpec) error {
 	return nil
 }
 
+// CreateOrphan creates a Longhorn Orphan resource and verifies creation
+func (s *DataStore) CreateOrphan(orphan *longhorn.Orphan) (*longhorn.Orphan, error) {
+	ret, err := s.lhClient.LonghornV1beta2().Orphans(s.namespace).Create(context.TODO(), orphan, metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if SkipListerCheck {
+		return ret, nil
+	}
+
+	obj, err := verifyCreation(orphan.Name, "orphan", func(name string) (runtime.Object, error) {
+		return s.GetOrphanRO(name)
+	})
+	if err != nil {
+		return nil, err
+	}
+	ret, ok := obj.(*longhorn.Orphan)
+	if !ok {
+		return nil, fmt.Errorf("BUG: datastore: verifyCreation returned wrong type for orphan")
+	}
+
+	return ret.DeepCopy(), nil
+}
+
 // GetOrphanRO returns the Orphan with the given orphan name in the cluster
 func (s *DataStore) GetOrphanRO(orphanName string) (*longhorn.Orphan, error) {
 	return s.oLister.Orphans(s.namespace).Get(orphanName)
