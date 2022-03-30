@@ -13,7 +13,7 @@ const (
 )
 
 const (
-	OrphanFileName = "Name"
+	OrphanDataName = "DataName"
 	OrphanDiskFsid = "DiskFsid"
 	OrphanDiskUUID = "DiskUUID"
 	OrphanDiskPath = "DiskPath"
@@ -38,7 +38,7 @@ type OrphanSpec struct {
 // OrphanStatus defines the observed state of the Longhorn orphaned data
 type OrphanStatus struct {
 	// +optional
-	OwnerID string `json:"OwnerID"`
+	OwnerID string `json:"ownerID"`
 	// +optional
 	// +nullable
 	Conditions []Condition `json:"conditions"`
@@ -52,7 +52,7 @@ type OrphanStatus struct {
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`,description="The type of the orphan"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.spec.nodeID`,description="The node that the orphan is on"
 // +kubebuilder:printcolumn:name="Disk",type=string,JSONPath=`.spec.parameters['DiskPath']`,description="The disk that the orphan is on"
-// +kubebuilder:printcolumn:name="File",type=string,JSONPath=`.spec.parameters['OrphanFileName']`,description="The current file or directory name of the orphan"
+// +kubebuilder:printcolumn:name="Data",type=string,JSONPath=`.spec.parameters['DataName']`,description="The current file or directory name of the orphan"
 // Orphan is where Longhorn stores orphan object.
 type Orphan struct {
 	metav1.TypeMeta   `json:",inline"`

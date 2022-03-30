@@ -3393,3 +3393,13 @@ func (s *DataStore) ListOrphans() (map[string]*longhorn.Orphan, error) {
 	}
 	return itemMap, nil
 }
+
+// ListOrphansRO returns a list of all Orphans for the given namespace
+func (s *DataStore) ListOrphansRO() ([]*longhorn.Orphan, error) {
+	return s.oLister.Orphans(s.namespace).List(labels.Everything())
+}
+
+// ListOrphansBySelectorRO returns a list of all Orphans for the given namespace
+func (s *DataStore) ListOrphansBySelectorRO(selector labels.Selector) ([]*longhorn.Orphan, error) {
+	return s.oLister.Orphans(s.namespace).List(selector)
+}

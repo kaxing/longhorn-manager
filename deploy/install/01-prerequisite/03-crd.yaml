@@ -1947,8 +1947,8 @@ spec:
       name: Disk
       type: string
     - description: The current file or directory name of the orphan
-      jsonPath: .spec.parameters['OrphanFileName']
-      name: File
+      jsonPath: .spec.parameters['DataName']
+      name: Data
       type: string
     name: v1beta2
     schema:
@@ -1982,8 +1982,6 @@ spec:
           status:
             description: OrphanStatus defines the observed state of the Longhorn orphaned data
             properties:
-              OwnerID:
-                type: string
               conditions:
                 items:
                   properties:
@@ -2008,6 +2006,8 @@ spec:
                   type: object
                 nullable: true
                 type: array
+              ownerID:
+                type: string
             type: object
         type: object
     served: true

@@ -435,7 +435,7 @@ func (nc *NodeController) syncNode(key string) (err error) {
 		return err
 	}
 
-	if err = nc.syncOrphanedReplicaDirectories(node, mon); err != nil {
+	if err := syncWithMonitor(mon, node); err != nil {
 		return err
 	}
 
@@ -443,6 +443,7 @@ func (nc *NodeController) syncNode(key string) (err error) {
 	if err := nc.syncDiskStatus(node); err != nil {
 		return err
 	}
+
 	// sync mount propagation status on current node
 	for _, pod := range managerPods {
 		if pod.Spec.NodeName == node.Name {
@@ -459,6 +460,8 @@ func (nc *NodeController) syncNode(key string) (err error) {
 	if err := nc.cleanUpBackingImagesInDisks(node); err != nil {
 		return err
 	}
+
+	nc.syncOrphans(node)
 
 	return nil
 }
@@ -551,173 +554,10 @@ func (nc *NodeController) enqueueKubernetesNode(obj interface{}) {
 	nc.enqueueNode(nodeRO)
 }
 
-type diskInfo struct {
-	entry *util.DiskInfo
-	err   error
-}
-
-func (nc *NodeController) getDiskInfoMap(node *longhorn.Node) map[string]*diskInfo {
-	result := map[string]*diskInfo{}
-	for id, disk := range node.Spec.Disks {
-		info, err := nc.getDiskInfoHandler(disk.Path)
-		result[id] = &diskInfo{
-			entry: info,
-			err:   err,
-		}
-	}
-	return result
-}
-
-// Check all disks in the same filesystem ID are in ready status
-func (nc *NodeController) isFSIDDuplicatedWithExistingReadyDisk(name string, disks []string, diskStatusMap map[string]*longhorn.DiskStatus) bool {
-	if len(disks) > 1 {
-		for _, otherName := range disks {
-			diskReady :=
-				types.GetCondition(
-					diskStatusMap[otherName].Conditions,
-					longhorn.DiskConditionTypeReady)
-
-			if (otherName != name) && (diskReady.Status ==
-				longhorn.ConditionStatusTrue) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
 func (nc *NodeController) syncDiskStatus(node *longhorn.Node) error {
 	log := getLoggerForNode(nc.logger, node)
 
-	// sync the disks between node.Spec.Disks and node.Status.DiskStatus
-	if node.Status.DiskStatus == nil {
-		node.Status.DiskStatus = map[string]*longhorn.DiskStatus{}
-	}
-	for id := range node.Spec.Disks {
-		if node.Status.DiskStatus[id] == nil {
-			node.Status.DiskStatus[id] = &longhorn.DiskStatus{}
-		}
-		diskStatus := node.Status.DiskStatus[id]
-		if diskStatus.Conditions == nil {
-			diskStatus.Conditions = []longhorn.Condition{}
-		}
-		if diskStatus.ScheduledReplica == nil {
-			diskStatus.ScheduledReplica = map[string]int64{}
-		}
-		// when condition are not ready, the old storage data should be cleaned
-		diskStatus.StorageMaximum = 0
-		diskStatus.StorageAvailable = 0
-		node.Status.DiskStatus[id] = diskStatus
-	}
-	for id := range node.Status.DiskStatus {
-		if _, exists := node.Spec.Disks[id]; !exists {
-			delete(node.Status.DiskStatus, id)
-		}
-	}
-
 	diskStatusMap := node.Status.DiskStatus
-	diskInfoMap := nc.getDiskInfoMap(node)
-
-	// update Ready condition
-	fsid2Disks := map[string][]string{}
-	for id, info := range diskInfoMap {
-		if info.err != nil {
-			diskStatusMap[id].Conditions = types.SetConditionAndRecord(diskStatusMap[id].Conditions,
-				longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
-				string(longhorn.DiskConditionReasonNoDiskInfo),
-				fmt.Sprintf("Disk %v(%v) on node %v is not ready: Get disk information error: %v", id, node.Spec.Disks[id].Path, node.Name, info.err),
-				nc.eventRecorder, node, v1.EventTypeWarning)
-		} else {
-			if fsid2Disks[info.entry.Fsid] == nil {
-				fsid2Disks[info.entry.Fsid] = []string{}
-			}
-			fsid2Disks[info.entry.Fsid] = append(fsid2Disks[info.entry.Fsid], id)
-		}
-	}
-
-	for fsid, disks := range fsid2Disks {
-		for _, id := range disks {
-			diskStatus := diskStatusMap[id]
-			disk := node.Spec.Disks[id]
-			diskUUID := ""
-			diskConfig, err := nc.getDiskConfig(node.Spec.Disks[id].Path)
-			if err != nil {
-				if !types.ErrorIsNotFound(err) {
-					diskStatusMap[id].Conditions = types.SetConditionAndRecord(diskStatusMap[id].Conditions,
-						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
-						string(longhorn.DiskConditionReasonNoDiskInfo),
-						fmt.Sprintf("Disk %v(%v) on node %v is not ready: failed to get disk config: error: %v", id, disk.Path, node.Name, err),
-						nc.eventRecorder, node, v1.EventTypeWarning)
-					continue
-				}
-			} else {
-				diskUUID = diskConfig.DiskUUID
-			}
-
-			if diskStatusMap[id].DiskUUID == "" {
-				// Check disks in the same filesystem
-				if nc.isFSIDDuplicatedWithExistingReadyDisk(
-					id, disks, diskStatusMap) {
-					// Found multiple disks in the same Fsid
-					diskStatusMap[id].Conditions =
-						types.SetConditionAndRecord(
-							diskStatusMap[id].Conditions,
-							longhorn.DiskConditionTypeReady,
-							longhorn.ConditionStatusFalse,
-							string(longhorn.DiskConditionReasonDiskFilesystemChanged),
-							fmt.Sprintf("Disk %v(%v) on node %v is not ready: disk has same file system ID %v as other disks %+v", id, disk.Path, node.Name, fsid, disks),
-							nc.eventRecorder, node,
-							v1.EventTypeWarning)
-					continue
-
-				}
-
-				if diskUUID == "" {
-					diskConfig, err := nc.generateDiskConfig(node.Spec.Disks[id].Path)
-					if err != nil {
-						diskStatusMap[id].Conditions = types.SetConditionAndRecord(diskStatusMap[id].Conditions,
-							longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
-							string(longhorn.DiskConditionReasonNoDiskInfo),
-							fmt.Sprintf("Disk %v(%v) on node %v is not ready: failed to generate disk config: error: %v", id, disk.Path, node.Name, err),
-							nc.eventRecorder, node, v1.EventTypeWarning)
-						continue
-					}
-					diskUUID = diskConfig.DiskUUID
-				}
-				diskStatus.DiskUUID = diskUUID
-			} else { // diskStatusMap[id].DiskUUID != ""
-				if diskUUID == "" {
-					diskStatusMap[id].Conditions = types.SetConditionAndRecord(diskStatusMap[id].Conditions,
-						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
-						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
-						fmt.Sprintf("Disk %v(%v) on node %v is not ready: cannot find disk config file, maybe due to a mount error", id, disk.Path, node.Name),
-						nc.eventRecorder, node, v1.EventTypeWarning)
-				} else if diskStatusMap[id].DiskUUID != diskUUID {
-					diskStatusMap[id].Conditions = types.SetConditionAndRecord(diskStatusMap[id].Conditions,
-						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
-						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
-						fmt.Sprintf("Disk %v(%v) on node %v is not ready: record diskUUID doesn't match the one on the disk ", id, disk.Path, node.Name),
-						nc.eventRecorder, node, v1.EventTypeWarning)
-				}
-			}
-
-			if diskStatus.DiskUUID == diskUUID {
-				// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
-				// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
-				const truncateTo = 100 * 1024 * 1024
-				usableStorage := (diskInfoMap[id].entry.StorageAvailable / truncateTo) * truncateTo
-				diskStatus.StorageAvailable = usableStorage
-				diskStatus.StorageMaximum = diskInfoMap[id].entry.StorageMaximum
-				diskStatusMap[id].Conditions = types.SetConditionAndRecord(diskStatusMap[id].Conditions,
-					longhorn.DiskConditionTypeReady, longhorn.ConditionStatusTrue,
-					"", fmt.Sprintf("Disk %v(%v) on node %v is ready", id, disk.Path, node.Name),
-					nc.eventRecorder, node, v1.EventTypeNormal)
-			}
-			diskStatusMap[id] = diskStatus
-		}
-
-	}
 
 	// update Schedulable condition
 	minimalAvailablePercentage, err := nc.ds.GetSettingAsInt(types.SettingNameStorageMinimalAvailablePercentage)
@@ -1043,7 +883,7 @@ func (nc *NodeController) checkMonitor(node *longhorn.Node) (*monitor.NodeMonito
 		return nc.monitor, nil
 	}
 
-	monitor, err := monitor.NewNodeMonitor(nc.logger, nc.ds, node, nc.enqueueNodeForMonitor)
+	monitor, err := monitor.NewNodeMonitor(nc.logger, nc.eventRecorder, nc.ds, node, nc.enqueueNodeForMonitor)
 	if err != nil {
 		return nil, err
 	}
@@ -1056,44 +896,49 @@ func (nc *NodeController) enqueueNodeForMonitor(key string) {
 	nc.queue.Add(key)
 }
 
-func (nc *NodeController) syncOrphanedReplicaDirectories(node *longhorn.Node, monitor *monitor.NodeMonitor) error {
-	updateNode := monitor.GetNode()
+func (nc *NodeController) syncOrphans(node *longhorn.Node) {
+	nc.cleanupOrphans(node)
 
-	if !reflect.DeepEqual(node.Spec.Disks, updateNode.Spec.Disks) {
-		logrus.Warnf("Node %v disks are changed, skip the update", node.Name)
-		return nil
-	}
+	nc.createOrphans(node)
+}
 
-	logrus.Infof("Update node %v disk status", node.Name)
-	node.Status.DiskStatus = updateNode.Status.DiskStatus
-
-	if err := nc.createOrphans(node); err != nil {
-		logrus.Infof("unable to create orphan resources since %v", err.Error())
+func (nc *NodeController) cleanupOrphans(node *longhorn.Node) error {
+	labelSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			types.GetLonghornLabelKey(types.LonghornLabelNode): node.Name,
+		},
+	})
+	if err != nil {
 		return err
 	}
 
+	orphans, err := nc.ds.ListOrphansBySelectorRO(labelSelector)
+	if err != nil {
+		return errors.Wrapf(err, "unable to list orphans with label %v=%v", types.GetLonghornLabelKey(types.LonghornLabelNode), node.Name)
+	}
+	for _, orphan := range orphans {
+		logrus.Infof("Debug ===> orphan=%+v", orphan)
+	}
 	return nil
 }
 
-func (nc *NodeController) createOrphans(node *longhorn.Node) error {
-	for fsid, status := range node.Status.DiskStatus {
-		for replicaDirectoryName := range status.OrphanedReplicaDirectoryNames {
-			if err := nc.createOrphan(node, replicaDirectoryName, fsid); err != nil {
+func (nc *NodeController) createOrphans(node *longhorn.Node) {
+	for id, disk := range node.Status.DiskStatus {
+		for replicaDirectoryName := range disk.OrphanedReplicaDirectoryNames {
+			if err := nc.createOrphan(node, replicaDirectoryName, id); err != nil {
 				logrus.Errorf("unable to create orphan for orphaned replica directory %v in disk %v on node %v since %v",
-					replicaDirectoryName, node.Spec.Disks[fsid].Path, node.Name, err.Error())
+					replicaDirectoryName, node.Spec.Disks[id].Path, node.Name, err.Error())
 				// If the orphan CR cannot be created successfully, then remove the replica directory name
 				// from OrphanedReplicaDirectoryNames. Next scan of orphaned replica directories will add
 				// it back and retry to create a CR.
-				delete(status.OrphanedReplicaDirectoryNames, replicaDirectoryName)
+				delete(disk.OrphanedReplicaDirectoryNames, replicaDirectoryName)
 			}
 		}
 	}
-
-	return nil
 }
 
-func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName, fsid string) error {
-	orphanName := types.GetOrphanChecksumName(fmt.Sprintf("%s-%s-%s", replicaDirectoryName, fsid, node.Name))
+func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName, id string) error {
+	orphanName := types.GetOrphanChecksumName(fmt.Sprintf("%s-%s-%s", replicaDirectoryName, id, node.Name))
 
 	_, err := nc.ds.GetOrphanRO(orphanName)
 	if err == nil || (err != nil && !apierrors.IsNotFound(err)) {
@@ -1108,10 +953,10 @@ func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName
 			NodeID: node.Name,
 			Type:   longhorn.OrphanTypeReplicaDirectory,
 			Parameters: map[string]string{
-				longhorn.OrphanFileName: replicaDirectoryName,
-				longhorn.OrphanDiskFsid: fsid,
-				longhorn.OrphanDiskUUID: node.Status.DiskStatus[fsid].DiskUUID,
-				longhorn.OrphanDiskPath: node.Spec.Disks[fsid].Path,
+				longhorn.OrphanDataName: replicaDirectoryName,
+				longhorn.OrphanDiskFsid: id,
+				longhorn.OrphanDiskUUID: node.Status.DiskStatus[id].DiskUUID,
+				longhorn.OrphanDiskPath: node.Spec.Disks[id].Path,
 			},
 		},
 	}
@@ -1119,4 +964,29 @@ func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName
 	_, err = nc.ds.CreateOrphan(orphan)
 
 	return err
+}
+
+func syncWithMonitor(monitor *monitor.NodeMonitor, node *longhorn.Node) error {
+	monitoredNode := monitor.GetNode()
+
+	if !isMonitoredNodeDiskStatusIsUpdated(node, monitoredNode) {
+		return errors.New("node in the monitor is not updated")
+	}
+
+	node.Status.DiskStatus = monitoredNode.Status.DiskStatus
+	return nil
+}
+
+func isMonitoredNodeDiskStatusIsUpdated(node *longhorn.Node, monitoredNode *longhorn.Node) bool {
+	if len(node.Spec.Disks) != len(monitoredNode.Status.DiskStatus) {
+		return false
+	}
+
+	for id := range node.Spec.Disks {
+		if _, exist := monitoredNode.Status.DiskStatus[id]; !exist {
+			return false
+		}
+	}
+
+	return true
 }

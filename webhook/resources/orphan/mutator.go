@@ -10,9 +10,14 @@ import (
 	"github.com/longhorn/longhorn-manager/datastore"
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 	"github.com/longhorn/longhorn-manager/types"
+	"github.com/longhorn/longhorn-manager/util"
 	"github.com/longhorn/longhorn-manager/webhook/admission"
 	werror "github.com/longhorn/longhorn-manager/webhook/error"
 	"github.com/pkg/errors"
+)
+
+var (
+	longhornFinalizerKey = longhorn.SchemeGroupVersion.Group
 )
 
 type orphanMutator struct {
@@ -48,7 +53,7 @@ func (o *orphanMutator) Create(request *admission.Request, newObj runtime.Object
 		labels = map[string]string{}
 	}
 
-	longhornLabels := types.GetOrphanLabels(orphan.Spec.NodeID, orphan.Spec.DiskUUID, orphan.Name)
+	longhornLabels := types.GetOrphanLabels(orphan.Spec.NodeID, orphan.Spec.Parameters["DiskUUID"], orphan.Name)
 	for k, v := range longhornLabels {
 		labels[k] = v
 	}
@@ -58,6 +63,16 @@ func (o *orphanMutator) Create(request *admission.Request, newObj runtime.Object
 		return nil, werror.NewInvalidError(err.Error(), "")
 	}
 	patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/metadata/labels", "value": %v}`, string(bytes)))
+
+	if err := util.AddFinalizer(longhornFinalizerKey, orphan); err != nil {
+		return nil, werror.NewInvalidError(err.Error(), "")
+	}
+	bytes, err = json.Marshal(orphan.Finalizers)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to get JSON encoding for orphan %v finalizers", orphan.Name)
+		return nil, werror.NewInvalidError(err.Error(), "")
+	}
+	patchOps = append(patchOps, fmt.Sprintf(`{"op": "replace", "path": "/metadata/finalizers", "value": %v}`, string(bytes)))
 
 	return patchOps, nil
 }
