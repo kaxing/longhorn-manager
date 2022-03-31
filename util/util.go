@@ -59,6 +59,8 @@ const (
 
 	SizeAlignment     = 2 * 1024 * 1024
 	MinimalVolumeSize = 10 * 1024 * 1024
+
+	RandomIDLenth = 8
 )
 
 var (
@@ -162,7 +164,13 @@ func WaitForDevice(dev string, timeout int) error {
 }
 
 func RandomID() string {
-	return UUID()[:8]
+	return UUID()[:RandomIDLenth]
+}
+
+func ValidateRandomID(id string) bool {
+	regex := fmt.Sprintf(`^[a-zA-Z0-9]{%d}$`, RandomIDLenth)
+	validName := regexp.MustCompile(regex)
+	return validName.MatchString(id)
 }
 
 func GetLocalIPs() ([]string, error) {
@@ -798,32 +806,6 @@ func Contains(list []string, item string) (int, bool) {
 	return -1, false
 }
 
-/*
-func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames []string, err error) {
-	defer func() {
-		err = errors.Wrapf(err, "cannot list replica directories in the disk %v", diskPath)
-	}()
-
-	replicaDirectoryNames = make([]string, 0)
-
-	directory := filepath.Join(diskPath, "replicas")
-
-	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
-	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
-	output, err := Execute([]string{}, "nsenter", mountPath, "ls", directory)
-	if err != nil {
-		return replicaDirectoryNames, err
-	}
-
-	names := strings.Split(output, "\n")
-	if len(names[len(names)-1]) == 0 {
-		names = names[:len(names)-1]
-	}
-
-	return names, nil
-}
-*/
-
 func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string]string, err error) {
 	defer func() {
 		err = errors.Wrapf(err, "cannot list replica directories in the disk %v", diskPath)
@@ -842,11 +824,44 @@ func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string
 
 	names := strings.Split(output, "\n")
 	for _, name := range names {
-		if len(name) == 0 {
+		if len(name) == 0 || !isReplicaDirectoryNameValid(name) {
 			continue
 		}
 		replicaDirectoryNames[name] = ""
 	}
 
 	return replicaDirectoryNames, nil
+}
+
+func DeleteReplicaDirectoryName(diskPath, replicaDirectoryName string) (err error) {
+	defer func() {
+		err = errors.Wrapf(err, "cannot delete replica directory %v in disk %v", replicaDirectoryName, diskPath)
+	}()
+
+	if len(diskPath) == 0 {
+		return errors.New(fmt.Sprintf("invalid disk path %v", diskPath))
+	}
+
+	if !isReplicaDirectoryNameValid(replicaDirectoryName) {
+		return errors.New(fmt.Sprintf("invalid replica directory name %v", replicaDirectoryName))
+	}
+
+	path := filepath.Join(diskPath, "replicas", replicaDirectoryName)
+
+	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
+	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
+	_, err = Execute([]string{}, "nsenter", mountPath, "rm", "-rf", path)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func isReplicaDirectoryNameValid(name string) bool {
+	if !strings.HasPrefix(name, "pvc-") || len(name) < RandomIDLenth || strings.Count(name, "-") < 2 {
+		return false
+	}
+
+	return ValidateRandomID(name[len(name)-RandomIDLenth:])
 }

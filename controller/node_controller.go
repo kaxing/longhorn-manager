@@ -461,7 +461,9 @@ func (nc *NodeController) syncNode(key string) (err error) {
 		return err
 	}
 
-	nc.syncOrphans(node)
+	if err := nc.syncOrphans(node); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -896,13 +898,27 @@ func (nc *NodeController) enqueueNodeForMonitor(key string) {
 	nc.queue.Add(key)
 }
 
-func (nc *NodeController) syncOrphans(node *longhorn.Node) {
-	nc.cleanupOrphans(node)
+func (nc *NodeController) syncOrphans(node *longhorn.Node) error {
+	nc.cleanupOrphansWithGoneDisks(node)
 
 	nc.createOrphans(node)
+
+	autoDeletion, err := nc.ds.GetSettingAsBool(types.SettingNameOrphanAutoDeletion)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get %v setting", types.SettingNameOrphanAutoDeletion)
+	}
+
+	if autoDeletion {
+		logrus.Info("Clean up orphans since auto-deletion is enabled")
+		if err := nc.ds.DeleteAllOrphansForNode(node.Name); err != nil {
+			return errors.Wrapf(err, "failed to delete orphans for node %v", node.Name)
+		}
+	}
+
+	return nil
 }
 
-func (nc *NodeController) cleanupOrphans(node *longhorn.Node) error {
+func (nc *NodeController) cleanupOrphansWithGoneDisks(node *longhorn.Node) error {
 	labelSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{
 			types.GetLonghornLabelKey(types.LonghornLabelNode): node.Name,
@@ -914,10 +930,17 @@ func (nc *NodeController) cleanupOrphans(node *longhorn.Node) error {
 
 	orphans, err := nc.ds.ListOrphansBySelectorRO(labelSelector)
 	if err != nil {
-		return errors.Wrapf(err, "unable to list orphans with label %v=%v", types.GetLonghornLabelKey(types.LonghornLabelNode), node.Name)
+		return errors.Wrapf(err, "unable to list orphans with label %v=%v",
+			types.GetLonghornLabelKey(types.LonghornLabelNode), node.Name)
 	}
 	for _, orphan := range orphans {
-		logrus.Infof("Debug ===> orphan=%+v", orphan)
+		id := orphan.Spec.Parameters["DiskFsid"]
+		if _, ok := node.Spec.Disks[id]; !ok {
+			logrus.Infof("Clean up orphan %v since the disk %v is already gone", orphan.Name, node.Spec.Disks[id].Path)
+			if err := nc.ds.DeleteOrphan(orphan.Name); err != nil {
+				logrus.Errorf("unable to delete orphan %v since %v", orphan.Name, err.Error())
+			}
+		}
 	}
 	return nil
 }

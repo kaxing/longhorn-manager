@@ -3403,3 +3403,14 @@ func (s *DataStore) ListOrphansRO() ([]*longhorn.Orphan, error) {
 func (s *DataStore) ListOrphansBySelectorRO(selector labels.Selector) ([]*longhorn.Orphan, error) {
 	return s.oLister.Orphans(s.namespace).List(selector)
 }
+
+// DeleteOrphan won't result in immediately deletion since finalizer was set by default
+func (s *DataStore) DeleteOrphan(orphanName string) error {
+	return s.lhClient.LonghornV1beta2().Orphans(s.namespace).Delete(context.TODO(), orphanName, metav1.DeleteOptions{})
+}
+
+// DeleteAllOrphansForNode won't result in immediately deletion since finalizer was set by default
+func (s *DataStore) DeleteAllOrphansForNode(nodeName string) error {
+	return s.lhClient.LonghornV1beta2().Orphans(s.namespace).DeleteCollection(context.TODO(), metav1.DeleteOptions{},
+		metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", types.GetLonghornLabelKey(types.LonghornLabelNode), nodeName)})
+}

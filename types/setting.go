@@ -73,6 +73,7 @@ const (
 	SettingNameBackingImageRecoveryWaitInterval             = SettingName("backing-image-recovery-wait-interval")
 	SettingNameGuaranteedEngineManagerCPU                   = SettingName("guaranteed-engine-manager-cpu")
 	SettingNameGuaranteedReplicaManagerCPU                  = SettingName("guaranteed-replica-manager-cpu")
+	SettingNameOrphanAutoDeletion                           = SettingName("orphan-auto-deletion")
 )
 
 var (
@@ -123,6 +124,7 @@ var (
 		SettingNameBackingImageRecoveryWaitInterval,
 		SettingNameGuaranteedEngineManagerCPU,
 		SettingNameGuaranteedReplicaManagerCPU,
+		SettingNameOrphanAutoDeletion,
 	}
 )
 
@@ -131,6 +133,7 @@ type SettingCategory string
 const (
 	SettingCategoryGeneral    = SettingCategory("general")
 	SettingCategoryBackup     = SettingCategory("backup")
+	SettingCategoryOrphan     = SettingCategory("orphan")
 	SettingCategoryScheduling = SettingCategory("scheduling")
 	SettingCategoryDangerZone = SettingCategory("danger Zone")
 )
@@ -194,6 +197,7 @@ var (
 		SettingNameBackingImageRecoveryWaitInterval:             SettingDefinitionBackingImageRecoveryWaitInterval,
 		SettingNameGuaranteedEngineManagerCPU:                   SettingDefinitionGuaranteedEngineManagerCPU,
 		SettingNameGuaranteedReplicaManagerCPU:                  SettingDefinitionGuaranteedReplicaManagerCPU,
+		SettingNameOrphanAutoDeletion:                           SettingDefinitionOrphanAutoDeletion,
 	}
 
 	SettingDefinitionBackupTarget = SettingDefinition{
@@ -739,6 +743,17 @@ var (
 		ReadOnly: false,
 		Default:  "12",
 	}
+
+	SettingDefinitionOrphanAutoDeletion = SettingDefinition{
+		DisplayName: "Orphan Auto-Deletion",
+		Description: "This setting allows Longhorn to delete the orphaned data and its corresponding resource automatically.",
+		Category:    SettingCategoryOrphan,
+		Type:        SettingTypeBool,
+		Required:    true,
+		ReadOnly:    false,
+		Default:     "false",
+	}
+
 )
 
 type NodeDownPodDeletionPolicy string
@@ -800,6 +815,8 @@ func ValidateSetting(name, value string) (err error) {
 	case SettingNameAutoCleanupSystemGeneratedSnapshot:
 		fallthrough
 	case SettingNameAutoDeletePodWhenVolumeDetachedUnexpectedly:
+		fallthrough
+	case SettingNameOrphanAutoDeletion:
 		fallthrough
 	case SettingNameUpgradeChecker:
 		if value != "true" && value != "false" {
@@ -888,7 +905,6 @@ func ValidateSetting(name, value string) (err error) {
 			return fmt.Errorf("guaranteed engine/replica cpu value %v should be between 0 to 40", value)
 		}
 	}
-
 	return nil
 }
 

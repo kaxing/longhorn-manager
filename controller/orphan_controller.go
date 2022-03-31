@@ -22,6 +22,7 @@ import (
 	"github.com/longhorn/longhorn-manager/datastore"
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 	"github.com/longhorn/longhorn-manager/types"
+	"github.com/longhorn/longhorn-manager/util"
 )
 
 type OrphanController struct {
@@ -208,5 +209,8 @@ func (oc *OrphanController) isResponsibleFor(orphan *longhorn.Orphan) bool {
 }
 
 func (oc *OrphanController) deleteOrphanedData(orphan *longhorn.Orphan) error {
-	return errors.New("TODO: delete on-disk orphaned data")
+	logrus.Infof("Deleting orphan %v replica directory %v in disk %v",
+		orphan.Name, orphan.Spec.Parameters["DataName"], orphan.Spec.Parameters["OrphanDiskPath"])
+
+	return util.DeleteReplicaDirectoryName(orphan.Spec.Parameters["DiskPath"], orphan.Spec.Parameters["DataName"])
 }
