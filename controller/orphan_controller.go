@@ -10,6 +10,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -73,8 +74,14 @@ func NewOrphanController(
 		UpdateFunc: func(old, cur interface{}) { oc.enqueueOrphan(cur) },
 		DeleteFunc: oc.enqueueOrphan,
 	})
-
 	oc.cacheSyncs = append(oc.cacheSyncs, ds.OrphanInformer.HasSynced)
+
+	ds.NodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(cur interface{}) { oc.enqueueForLonghornNode(cur) },
+		UpdateFunc: func(old, cur interface{}) { oc.enqueueForLonghornNode(cur) },
+		DeleteFunc: func(cur interface{}) { oc.enqueueForLonghornNode(cur) },
+	})
+	oc.cacheSyncs = append(oc.cacheSyncs, ds.NodeInformer.HasSynced)
 
 	return oc
 }
@@ -87,6 +94,44 @@ func (oc *OrphanController) enqueueOrphan(obj interface{}) {
 	}
 
 	oc.queue.Add(key)
+}
+
+func (oc *OrphanController) enqueueForLonghornNode(obj interface{}) {
+	node, ok := obj.(*longhorn.Node)
+	if !ok {
+		deletedState, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("received unexpected obj: %#v", obj))
+			return
+		}
+		// use the last known state, to enqueue, dependent objects
+		node, ok = deletedState.Obj.(*longhorn.Node)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("DeletedFinalStateUnknown contained invalid object: %#v", deletedState.Obj))
+			return
+		}
+	}
+
+	labelSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			types.GetLonghornLabelKey(types.LonghornLabelNode): node.Name,
+		},
+	})
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("failed to create label selector label since %v", err))
+		return
+	}
+
+	orphans, err := oc.ds.ListOrphansBySelectorRO(labelSelector)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("failed to list orphans with label %v=%v since %v",
+			types.GetLonghornLabelKey(types.LonghornLabelNode), node.Name, err))
+		return
+	}
+
+	for _, orphan := range orphans {
+		oc.enqueueOrphan(orphan)
+	}
 }
 
 func (oc *OrphanController) Run(workers int, stopCh <-chan struct{}) {
@@ -127,14 +172,17 @@ func (oc *OrphanController) handleErr(err error, key interface{}) {
 		return
 	}
 
+	log := oc.logger.WithField("orphan", key)
+
 	if oc.queue.NumRequeues(key) < maxRetries {
-		logrus.Warnf("Error syncing Longhorn orphan %v: %v", key, err)
+		log.WithError(err).Warnf("Error syncing Longhorn orphan %v: %v", key, err)
+
 		oc.queue.AddRateLimited(key)
 		return
 	}
 
 	utilruntime.HandleError(err)
-	logrus.Warnf("Dropping Longhorn orphan %v out of the queue: %v", key, err)
+	log.WithError(err).Warnf("Dropping Longhorn orphan %v out of the queue: %v", key, err)
 	oc.queue.Forget(key)
 }
 
@@ -153,14 +201,6 @@ func (oc *OrphanController) syncOrphan(key string) (err error) {
 	return oc.reconcile(name)
 }
 
-func getLoggerForOrphan(logger logrus.FieldLogger, orphan *longhorn.Orphan) *logrus.Entry {
-	return logger.WithFields(
-		logrus.Fields{
-			"orphan": orphan.Name,
-		},
-	)
-}
-
 func (oc *OrphanController) reconcile(orphanName string) (err error) {
 	orphan, err := oc.ds.GetOrphan(orphanName)
 	if err != nil {
@@ -170,20 +210,34 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 		return nil
 	}
 
+	log := getLoggerForOrphan(oc.logger, orphan)
+
 	if !oc.isResponsibleFor(orphan) {
 		return nil
 	}
 
-	log := getLoggerForOrphan(oc.logger, orphan)
+	if orphan.Status.OwnerID != oc.controllerID {
+		orphan.Status.OwnerID = oc.controllerID
+		orphan, err = oc.ds.UpdateOrphanStatus(orphan)
+		if err != nil {
+			// we don't mind others coming first
+			if apierrors.IsConflict(errors.Cause(err)) {
+				return nil
+			}
+			return err
+		}
+		log.Infof("Orphan Controller %v picked up %v", oc.controllerID, orphan.Name)
+	}
 
 	if !orphan.DeletionTimestamp.IsZero() {
-		err := oc.deleteOrphanedData(orphan)
-		if err != nil && !apierrors.IsNotFound(err) {
-			orphan.Status.Conditions = types.SetCondition(orphan.Status.Conditions,
-				longhorn.OrphanConditionTypeDeletable, longhorn.ConditionStatusFalse,
-				"", err.Error())
-			log.WithError(err).Errorf("error deleting orphan %v data", orphan.Name)
-			return err
+		if orphan.Spec.NodeID == oc.controllerID {
+			err := oc.deleteOrphanedData(orphan)
+			if err != nil && !apierrors.IsNotFound(err) {
+				orphan.Status.Conditions = types.SetCondition(orphan.Status.Conditions,
+					longhorn.OrphanConditionTypeDeletable, longhorn.ConditionStatusFalse, "", err.Error())
+				log.WithError(err).Errorf("error deleting orphan %v data", orphan.Name)
+				return err
+			}
 		}
 		return oc.ds.RemoveFinalizerForOrphan(orphan)
 	}
@@ -191,12 +245,12 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 	existingOrphan := orphan.DeepCopy()
 
 	orphan.Status.Conditions = types.SetCondition(orphan.Status.Conditions,
-		longhorn.OrphanConditionTypeDeletable, longhorn.ConditionStatusTrue,
-		"", "")
+		longhorn.OrphanConditionTypeDeletable, longhorn.ConditionStatusTrue, "", "")
 	if reflect.DeepEqual(existingOrphan.Status, orphan.Status) {
 		return nil
 	}
-	if _, err := oc.ds.UpdateOrphanStatus(orphan); err != nil && apierrors.IsConflict(errors.Cause(err)) {
+	_, err = oc.ds.UpdateOrphanStatus(orphan)
+	if err != nil && apierrors.IsConflict(errors.Cause(err)) {
 		log.WithError(err).Debugf("Requeue %v due to conflict", orphanName)
 		oc.enqueueOrphan(orphan)
 	}
@@ -204,13 +258,22 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 	return nil
 }
 
+func getLoggerForOrphan(logger logrus.FieldLogger, orphan *longhorn.Orphan) *logrus.Entry {
+	return logger.WithFields(
+		logrus.Fields{
+			"orphan": orphan.Name,
+		},
+	)
+}
+
 func (oc *OrphanController) isResponsibleFor(orphan *longhorn.Orphan) bool {
-	return isControllerResponsibleFor(oc.controllerID, oc.ds, orphan.Name, "", orphan.Spec.NodeID)
+	return isControllerResponsibleFor(oc.controllerID, oc.ds, orphan.Name, orphan.Spec.NodeID, orphan.Status.OwnerID)
 }
 
 func (oc *OrphanController) deleteOrphanedData(orphan *longhorn.Orphan) error {
-	logrus.Infof("Deleting orphan %v replica directory %v in disk %v",
-		orphan.Name, orphan.Spec.Parameters["DataName"], orphan.Spec.Parameters["OrphanDiskPath"])
+	oc.logger.Infof("Deleting orphan %v replica directory %v in disk %v on node %v",
+		orphan.Name, orphan.Spec.Parameters[longhorn.OrphanDataName],
+		orphan.Spec.Parameters[longhorn.OrphanDiskPath], orphan.Status.OwnerID)
 
-	return util.DeleteReplicaDirectoryName(orphan.Spec.Parameters["DiskPath"], orphan.Spec.Parameters["DataName"])
+	return util.DeleteReplicaDirectoryName(orphan.Spec.Parameters[longhorn.OrphanDiskPath], orphan.Spec.Parameters[longhorn.OrphanDataName])
 }

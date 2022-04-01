@@ -899,7 +899,13 @@ func (nc *NodeController) enqueueNodeForMonitor(key string) {
 }
 
 func (nc *NodeController) syncOrphans(node *longhorn.Node) error {
-	nc.cleanupOrphansWithGoneDisks(node)
+	if err := nc.cleanupOrphansWithDownNodes(node); err != nil {
+		logrus.Errorf("failed to clean up orphans with down nodes since %v", err.Error())
+	}
+
+	if err := nc.cleanupOrphansWithDownDisks(node); err != nil {
+		logrus.Errorf("failed to clean up orphans with down disks since %v", err.Error())
+	}
 
 	nc.createOrphans(node)
 
@@ -918,7 +924,25 @@ func (nc *NodeController) syncOrphans(node *longhorn.Node) error {
 	return nil
 }
 
-func (nc *NodeController) cleanupOrphansWithGoneDisks(node *longhorn.Node) error {
+func (nc *NodeController) cleanupOrphansWithDownNodes(node *longhorn.Node) error {
+	orphans, err := nc.ds.ListOrphansRO()
+	if err != nil {
+		return errors.Wrap(err, "unable to list orphans")
+	}
+
+	for _, orphan := range orphans {
+		if orphan.Status.OwnerID != "" &&
+			orphan.Spec.NodeID != orphan.Status.OwnerID &&
+			orphan.Status.OwnerID == node.Name {
+			if err = nc.ds.DeleteOrphan(orphan.Name); err != nil {
+				logrus.Errorf("failed to mark orphan %v for deletion since %v", orphan.Name, err.Error())
+			}
+		}
+	}
+	return nil
+}
+
+func (nc *NodeController) cleanupOrphansWithDownDisks(node *longhorn.Node) error {
 	labelSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{
 			types.GetLonghornLabelKey(types.LonghornLabelNode): node.Name,

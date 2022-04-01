@@ -53,7 +53,7 @@ func (o *orphanMutator) Create(request *admission.Request, newObj runtime.Object
 		labels = map[string]string{}
 	}
 
-	longhornLabels := types.GetOrphanLabels(orphan.Spec.NodeID, orphan.Spec.Parameters["DiskUUID"], orphan.Name)
+	longhornLabels := types.GetOrphanLabels(orphan.Spec.NodeID, orphan.Spec.Parameters[longhorn.OrphanDiskUUID], orphan.Name)
 	for k, v := range longhornLabels {
 		labels[k] = v
 	}
