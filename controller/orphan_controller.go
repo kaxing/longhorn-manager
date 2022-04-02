@@ -252,8 +252,16 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 			}
 		}
 
+		if node.Spec.EvictionRequested {
+			return nil
+		}
+
 		id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-		if _, ok := node.Spec.Disks[id]; !ok {
+		if disk, ok := node.Spec.Disks[id]; ok {
+			if disk.EvictionRequested {
+				return nil
+			}
+		} else {
 			log.Debugf("Only delete the orphan resource object since disk %v on node %v does not exist", id, node.Name)
 			return nil
 		}

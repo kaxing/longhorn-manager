@@ -41,6 +41,7 @@ const (
 	CRDBackupVolumeName           = "backupvolumes.longhorn.io"
 	CRDBackupName                 = "backups.longhorn.io"
 	CRDRecurringJobName           = "recurringjobs.longhorn.io"
+	CRDOrphanName                 = "orphans.longhorn"
 
 	LonghornNamespace = "longhorn-system"
 )
@@ -149,6 +150,10 @@ func NewUninstallController(
 	if _, err := extensionsClient.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), CRDRecurringJobName, metav1.GetOptions{}); err == nil {
 		ds.RecurringJobInformer.AddEventHandler(c.controlleeHandler())
 		cacheSyncs = append(cacheSyncs, ds.RecurringJobInformer.HasSynced)
+	}
+	if _, err := extensionsClient.ApiextensionsV1().CustomResourceDefinitions().Get(context.TODO(), CRDOrphanName, metav1.GetOptions{}); err == nil {
+		ds.OrphanInformer.AddEventHandler(c.controlleeHandler())
+		cacheSyncs = append(cacheSyncs, ds.OrphanInformer.HasSynced)
 	}
 
 	c.cacheSyncs = cacheSyncs

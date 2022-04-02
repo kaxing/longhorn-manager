@@ -901,12 +901,12 @@ func (nc *NodeController) enqueueNodeForMonitor(key string) {
 func (nc *NodeController) syncOrphans(node *longhorn.Node) error {
 	log := getLoggerForNode(nc.logger, node)
 
-	if err := nc.cleanupOrphansWithDownNodes(node); err != nil {
-		log.WithError(err).Errorf("failed to clean up orphans with down nodes")
+	if err := nc.cleanupOrphansOnEvictedOrDownDisks(node); err != nil {
+		log.WithError(err).Errorf("failed to clean up orphans on evicted or down disks")
 	}
 
-	if err := nc.cleanupOrphansWithDownDisks(node); err != nil {
-		log.WithError(err).Errorf("failed to clean up orphans with down disks")
+	if err := nc.cleanupOrphansOnEvictedOrDownNodes(node); err != nil {
+		log.WithError(err).Errorf("failed to clean up orphans on evicted or down nodes")
 	}
 
 	nc.createOrphans(node)
@@ -926,27 +926,7 @@ func (nc *NodeController) syncOrphans(node *longhorn.Node) error {
 	return nil
 }
 
-func (nc *NodeController) cleanupOrphansWithDownNodes(node *longhorn.Node) error {
-	log := getLoggerForNode(nc.logger, node)
-
-	orphans, err := nc.ds.ListOrphansRO()
-	if err != nil {
-		return errors.Wrap(err, "unable to list orphans")
-	}
-
-	for _, orphan := range orphans {
-		if orphan.Status.OwnerID != "" &&
-			orphan.Spec.NodeID != orphan.Status.OwnerID &&
-			orphan.Status.OwnerID == node.Name {
-			if err = nc.ds.DeleteOrphan(orphan.Name); err != nil {
-				log.WithError(err).Errorf("failed to delete orphan %v since %v", orphan.Name, err)
-			}
-		}
-	}
-	return nil
-}
-
-func (nc *NodeController) cleanupOrphansWithDownDisks(node *longhorn.Node) error {
+func (nc *NodeController) cleanupOrphansOnEvictedOrDownDisks(node *longhorn.Node) error {
 	log := getLoggerForNode(nc.logger, node)
 
 	labelSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
@@ -965,10 +945,34 @@ func (nc *NodeController) cleanupOrphansWithDownDisks(node *longhorn.Node) error
 	}
 	for _, orphan := range orphans {
 		id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-		if _, ok := node.Spec.Disks[id]; !ok {
-			logrus.Infof("Clean up orphan %v since the disk %v is down", orphan.Name, node.Spec.Disks[id].Path)
+		disk, ok := node.Spec.Disks[id]
+		if !ok || (ok && disk.EvictionRequested) {
+			logrus.Infof("Cleaning up orphan %v since the disk %v is evicted or down", orphan.Name, node.Spec.Disks[id].Path)
 			if err := nc.ds.DeleteOrphan(orphan.Name); err != nil {
-				log.WithError(err).Errorf("failed to delete orphan %v since %v", orphan.Name, err)
+				log.WithError(err).Errorf("failed to delete orphan %v", orphan.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func (nc *NodeController) cleanupOrphansOnEvictedOrDownNodes(node *longhorn.Node) error {
+	log := getLoggerForNode(nc.logger, node)
+
+	orphans, err := nc.ds.ListOrphansRO()
+	if err != nil {
+		return errors.Wrap(err, "unable to list orphans")
+	}
+
+	for _, orphan := range orphans {
+		if orphan.Status.OwnerID != node.Name {
+			continue
+		}
+
+		if (orphan.Status.OwnerID != "" && orphan.Spec.NodeID != orphan.Status.OwnerID) ||
+			node.Spec.EvictionRequested {
+			if err = nc.ds.DeleteOrphan(orphan.Name); err != nil {
+				log.WithError(err).Errorf("failed to delete orphan %v", orphan.Name)
 			}
 		}
 	}
