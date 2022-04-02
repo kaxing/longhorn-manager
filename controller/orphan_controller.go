@@ -245,7 +245,7 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 		node, err := oc.ds.GetNode(orphan.Spec.NodeID)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
-				// Node does not exist, so we only delete the orphan resource object.
+				log.Debugf("Only delete the orphan resource object since node %v does not exist", node.Name)
 				return nil
 			} else {
 				return err
@@ -253,8 +253,8 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 		}
 
 		id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-		if _, ok := node.Status.DiskStatus[id]; !ok {
-			// Disk does not exist, so we only delete the orphan resource object.
+		if _, ok := node.Spec.Disks[id]; !ok {
+			log.Debugf("Only delete the orphan resource object since disk %v on node %v does not exist", id, node.Name)
 			return nil
 		}
 

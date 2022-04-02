@@ -115,6 +115,9 @@ func (m *NodeMonitor) syncNode() error {
 
 	m.node = *node
 
+	key := m.node.Namespace + "/" + m.node.Name
+	m.syncCallback(key)
+
 	return nil
 }
 
