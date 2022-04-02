@@ -230,7 +230,35 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 	}
 
 	if !orphan.DeletionTimestamp.IsZero() {
-		if orphan.Spec.NodeID == oc.controllerID {
+		defer func() {
+			if err == nil {
+				err = oc.ds.RemoveFinalizerForOrphan(orphan)
+			}
+		}()
+
+		// Make sure if the orphan node and controller ID are same.
+		// If NO, just delete the orphan resource object.
+		if orphan.Spec.NodeID != oc.controllerID {
+			return nil
+		}
+
+		node, err := oc.ds.GetNode(orphan.Spec.NodeID)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// Node does not exist, so we only delete the orphan resource object.
+				return nil
+			} else {
+				return err
+			}
+		}
+
+		id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
+		if _, ok := node.Status.DiskStatus[id]; !ok {
+			// Disk does not exist, so we only delete the orphan resource object.
+			return nil
+		}
+
+		if node.Status.DiskStatus[id].DiskUUID == orphan.Spec.Parameters[longhorn.OrphanDiskUUID] {
 			err := oc.deleteOrphanedData(orphan)
 			if err != nil && !apierrors.IsNotFound(err) {
 				orphan.Status.Conditions = types.SetCondition(orphan.Status.Conditions,
@@ -239,7 +267,7 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 				return err
 			}
 		}
-		return oc.ds.RemoveFinalizerForOrphan(orphan)
+		return nil
 	}
 
 	existingOrphan := orphan.DeepCopy()

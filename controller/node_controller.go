@@ -899,12 +899,14 @@ func (nc *NodeController) enqueueNodeForMonitor(key string) {
 }
 
 func (nc *NodeController) syncOrphans(node *longhorn.Node) error {
+	log := getLoggerForNode(nc.logger, node)
+
 	if err := nc.cleanupOrphansWithDownNodes(node); err != nil {
-		logrus.Errorf("failed to clean up orphans with down nodes since %v", err.Error())
+		log.WithError(err).Errorf("failed to clean up orphans with down nodes")
 	}
 
 	if err := nc.cleanupOrphansWithDownDisks(node); err != nil {
-		logrus.Errorf("failed to clean up orphans with down disks since %v", err.Error())
+		log.WithError(err).Errorf("failed to clean up orphans with down disks")
 	}
 
 	nc.createOrphans(node)
@@ -925,6 +927,8 @@ func (nc *NodeController) syncOrphans(node *longhorn.Node) error {
 }
 
 func (nc *NodeController) cleanupOrphansWithDownNodes(node *longhorn.Node) error {
+	log := getLoggerForNode(nc.logger, node)
+
 	orphans, err := nc.ds.ListOrphansRO()
 	if err != nil {
 		return errors.Wrap(err, "unable to list orphans")
@@ -935,7 +939,7 @@ func (nc *NodeController) cleanupOrphansWithDownNodes(node *longhorn.Node) error
 			orphan.Spec.NodeID != orphan.Status.OwnerID &&
 			orphan.Status.OwnerID == node.Name {
 			if err = nc.ds.DeleteOrphan(orphan.Name); err != nil {
-				logrus.Errorf("failed to mark orphan %v for deletion since %v", orphan.Name, err.Error())
+				log.WithError(err).Errorf("failed to delete orphan %v since %v", orphan.Name, err)
 			}
 		}
 	}
@@ -943,6 +947,8 @@ func (nc *NodeController) cleanupOrphansWithDownNodes(node *longhorn.Node) error
 }
 
 func (nc *NodeController) cleanupOrphansWithDownDisks(node *longhorn.Node) error {
+	log := getLoggerForNode(nc.logger, node)
+
 	labelSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{
 			types.GetLonghornLabelKey(types.LonghornLabelNode): node.Name,
@@ -958,11 +964,11 @@ func (nc *NodeController) cleanupOrphansWithDownDisks(node *longhorn.Node) error
 			types.GetLonghornLabelKey(types.LonghornLabelNode), node.Name)
 	}
 	for _, orphan := range orphans {
-		id := orphan.Spec.Parameters["DiskFsid"]
+		id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
 		if _, ok := node.Spec.Disks[id]; !ok {
-			logrus.Infof("Clean up orphan %v since the disk %v is already gone", orphan.Name, node.Spec.Disks[id].Path)
+			logrus.Infof("Clean up orphan %v since the disk %v is down", orphan.Name, node.Spec.Disks[id].Path)
 			if err := nc.ds.DeleteOrphan(orphan.Name); err != nil {
-				logrus.Errorf("unable to delete orphan %v since %v", orphan.Name, err.Error())
+				log.WithError(err).Errorf("failed to delete orphan %v since %v", orphan.Name, err)
 			}
 		}
 	}
@@ -970,11 +976,13 @@ func (nc *NodeController) cleanupOrphansWithDownDisks(node *longhorn.Node) error
 }
 
 func (nc *NodeController) createOrphans(node *longhorn.Node) {
+	log := getLoggerForNode(nc.logger, node)
+
 	for id, disk := range node.Status.DiskStatus {
 		for replicaDirectoryName := range disk.OrphanedReplicaDirectoryNames {
 			if err := nc.createOrphan(node, replicaDirectoryName, id); err != nil {
-				logrus.Errorf("unable to create orphan for orphaned replica directory %v in disk %v on node %v since %v",
-					replicaDirectoryName, node.Spec.Disks[id].Path, node.Name, err.Error())
+				log.WithError(err).Errorf("unable to create orphan for orphaned replica directory %v in disk %v on node %v since %v",
+					replicaDirectoryName, node.Spec.Disks[id].Path, node.Name, err)
 				// If the orphan CR cannot be created successfully, then remove the replica directory name
 				// from OrphanedReplicaDirectoryNames. Next scan of orphaned replica directories will add
 				// it back and retry to create a CR.

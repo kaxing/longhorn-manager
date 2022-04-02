@@ -123,12 +123,12 @@ func (m *NodeMonitor) Close() {
 }
 
 func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) {
-	// sync the disks between node.Spec.Disks and node.Status.DiskStatus
+	// Sync the disks between node.Spec.Disks and node.Status.DiskStatus.
 	if node.Status.DiskStatus == nil {
 		node.Status.DiskStatus = map[string]*longhorn.DiskStatus{}
 	}
 
-	// aligh node.Spec.Disks and node.Status.DiskStatus
+	// Aligh node.Spec.Disks and node.Status.DiskStatus.
 	for id := range node.Spec.Disks {
 		if node.Status.DiskStatus[id] == nil {
 			node.Status.DiskStatus[id] = &longhorn.DiskStatus{}
@@ -316,6 +316,7 @@ func copyMap(m map[string]string) map[string]string {
 
 func (m *NodeMonitor) getDiskInfoMap(node *longhorn.Node) map[string]*diskInfo {
 	result := map[string]*diskInfo{}
+
 	for id, disk := range node.Spec.Disks {
 		info, err := m.getDiskInfoHandler(disk.Path)
 		result[id] = &diskInfo{
