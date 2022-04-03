@@ -84,7 +84,7 @@ type diskInfo struct {
 }
 
 func (m *NodeMonitor) monitorNode() {
-	wait.PollUntil(NodeMonitorSyncPeriod, func() (done bool, err error) {
+	wait.PollImmediateUntil(NodeMonitorSyncPeriod, func() (done bool, err error) {
 		if err := m.syncNode(); err != nil {
 			m.logger.Errorf("Stop monitoring because of %v", err)
 			m.Close()
@@ -155,10 +155,13 @@ func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) {
 		}
 	}
 
+	m.updateDiskStatusReadyCondition(node)
+}
+
+func (m *NodeMonitor) updateDiskStatusReadyCondition(node *longhorn.Node) {
 	diskStatusMap := node.Status.DiskStatus
 	diskInfoMap := m.getDiskInfoMap(node)
 
-	// update Ready condition
 	fsid2Disks := map[string][]string{}
 	for id, info := range diskInfoMap {
 		if info.err != nil {

@@ -46,19 +46,12 @@ type NodeController struct {
 
 	cacheSyncs []cache.InformerSynced
 
-	getDiskInfoHandler    GetDiskInfoHandler
 	topologyLabelsChecker TopologyLabelsChecker
-	getDiskConfig         GetDiskConfig
-	generateDiskConfig    GenerateDiskConfig
 
 	scheduler *scheduler.ReplicaScheduler
 }
 
-type GetDiskInfoHandler func(string) (*util.DiskInfo, error)
 type TopologyLabelsChecker func(kubeClient clientset.Interface, vers string) (bool, error)
-
-type GetDiskConfig func(string) (*util.DiskConfig, error)
-type GenerateDiskConfig func(string) (*util.DiskConfig, error)
 
 func NewNodeController(
 	logger logrus.FieldLogger,
@@ -83,10 +76,7 @@ func NewNodeController(
 
 		ds: ds,
 
-		getDiskInfoHandler:    util.GetDiskInfo,
 		topologyLabelsChecker: util.IsKubernetesVersionAtLeast,
-		getDiskConfig:         util.GetDiskConfig,
-		generateDiskConfig:    util.GenerateDiskConfig,
 	}
 
 	nc.scheduler = scheduler.NewReplicaScheduler(ds)
@@ -464,7 +454,6 @@ func (nc *NodeController) syncNode(key string) (err error) {
 	if err := nc.syncOrphans(node); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -557,6 +546,10 @@ func (nc *NodeController) enqueueKubernetesNode(obj interface{}) {
 }
 
 func (nc *NodeController) syncDiskStatus(node *longhorn.Node) error {
+	return nc.updateDiskStatusSchedulableCondition(node)
+}
+
+func (nc *NodeController) updateDiskStatusSchedulableCondition(node *longhorn.Node) error {
 	log := getLoggerForNode(nc.logger, node)
 
 	diskStatusMap := node.Status.DiskStatus
@@ -1028,11 +1021,16 @@ func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName
 func syncWithMonitor(monitor *monitor.NodeMonitor, node *longhorn.Node) error {
 	monitoredNode := monitor.GetNode()
 
+	if monitoredNode == nil {
+		return errors.New("cannot find node in monitor")
+	}
+
 	if !isMonitoredNodeDiskStatusIsUpdated(node, monitoredNode) {
-		return errors.New("node in the monitor is not updated")
+		return errors.New("node disk status is not updated yet")
 	}
 
 	node.Status.DiskStatus = monitoredNode.Status.DiskStatus
+
 	return nil
 }
 
