@@ -24,10 +24,7 @@ const (
 )
 
 type NodeMonitor struct {
-	logger logrus.FieldLogger
-
-	eventRecorder record.EventRecorder
-	ds            *datastore.DataStore
+	*baseMonitor
 
 	node longhorn.Node
 	lock sync.RWMutex
@@ -38,9 +35,6 @@ type NodeMonitor struct {
 	getDiskInfoHandler GetDiskInfoHandler
 	getDiskConfig      GetDiskConfig
 	generateDiskConfig GenerateDiskConfig
-
-	ctx  context.Context
-	quit context.CancelFunc
 }
 
 type GetDiskInfoHandler func(string) (*util.DiskInfo, error)
@@ -52,10 +46,7 @@ func NewNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRecorde
 	ctx, quit := context.WithCancel(context.Background())
 
 	m := &NodeMonitor{
-		logger: logger,
-
-		eventRecorder: eventRecorder,
-		ds:            ds,
+		baseMonitor: newBaseMonitor(logger, eventRecorder, ds, NodeMonitorSyncPeriod, ctx, quit),
 
 		node: *node,
 		lock: sync.RWMutex{},
@@ -67,13 +58,9 @@ func NewNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRecorde
 		getDiskInfoHandler: util.GetDiskInfo,
 		getDiskConfig:      util.GetDiskConfig,
 		generateDiskConfig: util.GenerateDiskConfig,
-
-		ctx:  ctx,
-		quit: quit,
 	}
 
-	// Create a goroutine to monitor the node's disks status
-	go m.monitorNode()
+	go m.Start()
 
 	return m, nil
 }
@@ -83,9 +70,9 @@ type diskInfo struct {
 	err   error
 }
 
-func (m *NodeMonitor) monitorNode() {
-	wait.PollImmediateUntil(NodeMonitorSyncPeriod, func() (done bool, err error) {
-		if err := m.syncNode(); err != nil {
+func (m *NodeMonitor) Start() {
+	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
+		if err := m.syncState(); err != nil {
 			m.logger.Errorf("Stop monitoring because of %v", err)
 			m.Close()
 		}
@@ -93,7 +80,17 @@ func (m *NodeMonitor) monitorNode() {
 	}, m.ctx.Done())
 }
 
-func (m *NodeMonitor) syncNode() error {
+func (m *NodeMonitor) Close() {
+	m.quit()
+}
+
+func (m *NodeMonitor) GetState() interface{} {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	return m.node.DeepCopy()
+}
+
+func (m *NodeMonitor) syncState() error {
 	node, err := m.ds.GetNode(m.node.Name)
 	if err != nil {
 		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.node.Name)
@@ -119,10 +116,6 @@ func (m *NodeMonitor) syncNode() error {
 	m.syncCallback(key)
 
 	return nil
-}
-
-func (m *NodeMonitor) Close() {
-	m.quit()
 }
 
 func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) {
@@ -304,12 +297,6 @@ func (m *NodeMonitor) getOnDiskOrphanedReplicaDirectoryNames(node *longhorn.Node
 	}
 
 	return orphanedReplicaDirectoryNames
-}
-
-func (m *NodeMonitor) GetNode() *longhorn.Node {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
-	return m.node.DeepCopy()
 }
 
 func copyMap(m map[string]string) map[string]string {

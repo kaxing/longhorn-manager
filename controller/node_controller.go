@@ -40,7 +40,7 @@ type NodeController struct {
 	kubeClient    clientset.Interface
 	eventRecorder record.EventRecorder
 
-	monitor *monitor.NodeMonitor
+	monitor monitor.Monitor
 
 	ds *datastore.DataStore
 
@@ -869,7 +869,7 @@ func BackingImageDiskFileCleanup(node *longhorn.Node, bi *longhorn.BackingImage,
 	}
 }
 
-func (nc *NodeController) checkMonitor(node *longhorn.Node) (*monitor.NodeMonitor, error) {
+func (nc *NodeController) checkMonitor(node *longhorn.Node) (monitor.Monitor, error) {
 	if node == nil {
 		return nil, nil
 	}
@@ -1018,9 +1018,10 @@ func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName
 	return err
 }
 
-func syncWithMonitor(monitor *monitor.NodeMonitor, node *longhorn.Node) error {
-	monitoredNode := monitor.GetNode()
+func syncWithMonitor(monitor monitor.Monitor, node *longhorn.Node) error {
+	state := monitor.GetState()
 
+	monitoredNode := state.(*longhorn.Node)
 	if monitoredNode == nil {
 		return errors.New("cannot find node in monitor")
 	}
