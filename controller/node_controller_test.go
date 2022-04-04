@@ -15,8 +15,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/kubernetes/pkg/controller"
 
+	monitor "github.com/longhorn/longhorn-manager/controller/monitor"
 	"github.com/longhorn/longhorn-manager/datastore"
-	"github.com/longhorn/longhorn-manager/util"
 
 	longhorn "github.com/longhorn/longhorn-manager/k8s/pkg/apis/longhorn/v1beta2"
 	lhfake "github.com/longhorn/longhorn-manager/k8s/pkg/client/clientset/versioned/fake"
@@ -32,7 +32,9 @@ const (
 	KubeNodePressure = "kubeNodePressure"
 )
 
-var MountPropagationBidirectional = v1.MountPropagationBidirectional
+var (
+	MountPropagationBidirectional = v1.MountPropagationBidirectional
+)
 
 type NodeTestCase struct {
 	nodes           map[string]*longhorn.Node
@@ -55,44 +57,16 @@ func newTestNodeController(lhInformerFactory lhinformerfactory.SharedInformerFac
 	nc := NewNodeController(logger, ds, scheme.Scheme, kubeClient, TestNamespace, controllerID)
 	fakeRecorder := record.NewFakeRecorder(100)
 	nc.eventRecorder = fakeRecorder
-	nc.getDiskInfoHandler = fakeGetDiskInfo
 	nc.topologyLabelsChecker = fakeTopologyLabelsChecker
-	nc.getDiskConfig = fakeGetDiskConfig
-	nc.generateDiskConfig = fakeGenerateDiskConfig
+
 	for index := range nc.cacheSyncs {
 		nc.cacheSyncs[index] = alwaysReady
 	}
 	return nc
 }
 
-func fakeGetDiskInfo(directory string) (*util.DiskInfo, error) {
-	return &util.DiskInfo{
-		Fsid:       "fsid",
-		Path:       directory,
-		Type:       "ext4",
-		FreeBlock:  0,
-		TotalBlock: 0,
-		BlockSize:  0,
-
-		StorageMaximum:   0,
-		StorageAvailable: 0,
-	}, nil
-}
-
 func fakeTopologyLabelsChecker(kubeClient clientset.Interface, vers string) (bool, error) {
 	return false, nil
-}
-
-func fakeGetDiskConfig(path string) (*util.DiskConfig, error) {
-	return &util.DiskConfig{
-		DiskUUID: TestDiskID1,
-	}, nil
-}
-
-func fakeGenerateDiskConfig(path string) (*util.DiskConfig, error) {
-	return &util.DiskConfig{
-		DiskUUID: TestDiskID1,
-	}, nil
 }
 
 func generateKubeNodes(testType string) map[string]*v1.Node {
@@ -656,9 +630,20 @@ func (s *TestSuite) TestSyncNode(c *C) {
 			err = imIndexer.Add(rm)
 			c.Assert(err, IsNil)
 		}
+
 		// sync node status
 		for nodeName, node := range tc.nodes {
-			err := nc.syncNode(getKey(node, c))
+			enqueueNodeForMonitor := func(key string) {
+				nc.queue.Add(key)
+			}
+			mon, err := monitor.NewFakeNodeMonitor(nc.logger, nc.eventRecorder, nc.ds, node, enqueueNodeForMonitor)
+			c.Assert(err, IsNil)
+			nc.monitor = mon
+
+			err = nc.monitor.SyncState()
+			c.Assert(err, IsNil)
+
+			err = nc.syncNode(getKey(node, c))
 			c.Assert(err, IsNil)
 
 			n, err := lhClient.LonghornV1beta2().Nodes(TestNamespace).Get(context.TODO(), node.Name, metav1.GetOptions{})

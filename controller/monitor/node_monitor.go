@@ -72,7 +72,7 @@ type diskInfo struct {
 
 func (m *NodeMonitor) Start() {
 	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
-		if err := m.syncState(); err != nil {
+		if err := m.SyncState(); err != nil {
 			m.logger.Errorf("Stop monitoring because of %v", err)
 			m.Close()
 		}
@@ -90,7 +90,7 @@ func (m *NodeMonitor) GetState() interface{} {
 	return m.node.DeepCopy()
 }
 
-func (m *NodeMonitor) syncState() error {
+func (m *NodeMonitor) SyncState() error {
 	node, err := m.ds.GetNode(m.node.Name)
 	if err != nil {
 		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.node.Name)

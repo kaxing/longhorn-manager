@@ -54,14 +54,12 @@ func NewFakeNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRec
 		generateDiskConfig: fakeGenerateDiskConfig,
 	}
 
-	go m.Start()
-
 	return m, nil
 }
 
 func (m *FakeNodeMonitor) Start() {
 	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
-		if err := m.syncState(); err != nil {
+		if err := m.SyncState(); err != nil {
 			m.logger.Errorf("Stop monitoring because of %v", err)
 			m.Close()
 		}
@@ -79,7 +77,7 @@ func (m *FakeNodeMonitor) GetState() interface{} {
 	return m.node.DeepCopy()
 }
 
-func (m *FakeNodeMonitor) syncState() error {
+func (m *FakeNodeMonitor) SyncState() error {
 	node, err := m.ds.GetNode(m.node.Name)
 	if err != nil {
 		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.node.Name)

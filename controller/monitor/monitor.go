@@ -14,6 +14,7 @@ type Monitor interface {
 	Start()
 	Close()
 
+	SyncState() error
 	GetState() interface{}
 }
 
