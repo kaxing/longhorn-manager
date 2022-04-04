@@ -1041,7 +1041,13 @@ func isMonitoredNodeDiskStatusIsUpdated(node *longhorn.Node, monitoredNode *long
 	}
 
 	for id := range node.Spec.Disks {
-		if _, exist := monitoredNode.Status.DiskStatus[id]; !exist {
+		status, exist := monitoredNode.Status.DiskStatus[id]
+		if !exist {
+			return false
+		}
+
+		condition := types.GetCondition(status.Conditions, longhorn.DiskConditionTypeReady)
+		if condition.Status != longhorn.ConditionStatusTrue && condition.Status != longhorn.ConditionStatusFalse {
 			return false
 		}
 	}
