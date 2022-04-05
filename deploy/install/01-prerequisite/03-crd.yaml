@@ -1872,6 +1872,10 @@ spec:
                       type: array
                     diskUUID:
                       type: string
+                    orphanedReplicaDirectoryNames:
+                      additionalProperties:
+                        type: string
+                      type: object
                     scheduledReplica:
                       additionalProperties:
                         format: int64
