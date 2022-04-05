@@ -779,10 +779,14 @@ func MinInt(a, b int) int {
 	return b
 }
 
-func Contains(list []string, item string) bool {
-	for _, i := range list {
-		if i == item {
-			return true
+func Contains(list []string, item string) (int, bool) {
+	for i, v := range list {
+		if v == item {
+			return i, true
+		}
+	}
+	return -1, false
+}
 		}
 	}
 	return false
