@@ -91,6 +91,7 @@ const (
 	LonghornLabelBackupVolume             = "backup-volume"
 	LonghornLabelRecurringJob             = "job"
 	LonghornLabelRecurringJobGroup        = "job-group"
+	LonghornLabelOrphan                   = "orphan"
 	LonghornLabelCRDAPIVersion            = "crd-api-version"
 
 	LonghornLabelValueEnabled = "enabled"
@@ -171,6 +172,7 @@ const (
 	engineImagePrefix          = "ei-"
 	instanceManagerImagePrefix = "imi-"
 	shareManagerImagePrefix    = "smi-"
+	orphanPrefix               = "orphan-"
 
 	BackingImageDataSourcePodNamePrefix = "backing-image-ds-"
 
@@ -397,6 +399,15 @@ func GetRecurringJobLabelValueMap(labelType, recurringJobName string) map[string
 		GetRecurringJobLabelKey(labelType, recurringJobName): LonghornLabelValueEnabled,
 	}
 }
+
+func GetOrphanLabels(node, diskUUID, orphanName string) map[string]string {
+	labels := GetBaseLabelsForSystemManagedComponent()
+	labels[GetLonghornLabelComponentKey()] = LonghornLabelOrphan
+	labels[GetLonghornLabelKey(LonghornLabelNode)] = node
+	labels[GetLonghornLabelKey(LonghornLabelDiskUUID)] = diskUUID
+	return labels
+}
+
 func GetRegionAndZone(labels map[string]string) (string, string) {
 	region := ""
 	zone := ""
@@ -419,6 +430,10 @@ func GetInstanceManagerImageChecksumName(image string) string {
 
 func GetShareManagerImageChecksumName(image string) string {
 	return shareManagerImagePrefix + util.GetStringChecksum(strings.TrimSpace(image))[:ImageChecksumNameLength]
+}
+
+func GetOrphanChecksumName(name string) string {
+	return orphanPrefix + util.GetStringChecksumSHA256(strings.TrimSpace(name))
 }
 
 func GetShareManagerPodNameFromShareManagerName(smName string) string {
