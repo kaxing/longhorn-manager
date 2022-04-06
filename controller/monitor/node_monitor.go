@@ -3,10 +3,10 @@ package monitor
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
+	"github.com/jinzhu/copier"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -26,15 +26,20 @@ const (
 type NodeMonitor struct {
 	*baseMonitor
 
-	node longhorn.Node
-	lock sync.RWMutex
+	stateLock sync.RWMutex
+	state     *NodeMonitorState
 
-	onDiskReplicaDirectoryNames map[string]map[string]string
+	syncCallback func(key string)
 
-	syncCallback       func(key string)
 	getDiskInfoHandler GetDiskInfoHandler
 	getDiskConfig      GetDiskConfig
 	generateDiskConfig GenerateDiskConfig
+}
+
+type NodeMonitorState struct {
+	Revision                    int64
+	Node                        *longhorn.Node
+	OnDiskReplicaDirectoryNames map[string]map[string]string
 }
 
 type GetDiskInfoHandler func(string) (*util.DiskInfo, error)
@@ -48,10 +53,12 @@ func NewNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRecorde
 	m := &NodeMonitor{
 		baseMonitor: newBaseMonitor(logger, eventRecorder, ds, NodeMonitorSyncPeriod, ctx, quit),
 
-		node: *node,
-		lock: sync.RWMutex{},
-
-		onDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
+		stateLock: sync.RWMutex{},
+		state: &NodeMonitorState{
+			Revision:                    0,
+			Node:                        node.DeepCopy(),
+			OnDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
+		},
 
 		syncCallback: syncCallback,
 
@@ -73,8 +80,7 @@ type diskInfo struct {
 func (m *NodeMonitor) Start() {
 	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
 		if err := m.SyncState(); err != nil {
-			m.logger.Errorf("Stop monitoring because of %v", err)
-			m.Close()
+			m.logger.Errorf("failed to sync state because of %v", err)
 		}
 		return false, nil
 	}, m.ctx.Done())
@@ -84,38 +90,43 @@ func (m *NodeMonitor) Close() {
 	m.quit()
 }
 
-func (m *NodeMonitor) GetState() interface{} {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
-	return m.node.DeepCopy()
+func (m *NodeMonitor) GetState() (interface{}, error) {
+	m.stateLock.RLock()
+	defer m.stateLock.RUnlock()
+
+	state := &NodeMonitorState{}
+	if err := copier.Copy(state, m.state); err != nil {
+		return nil, errors.Wrapf(err, "failed to copy node monitor state")
+	}
+
+	return state, nil
 }
 
 func (m *NodeMonitor) SyncState() error {
-	node, err := m.ds.GetNode(m.node.Name)
+	node, err := m.ds.GetNode(m.state.Node.Name)
 	if err != nil {
-		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.node.Name)
+		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.state.Node.Name)
 		return err
 	}
 
 	m.syncDiskStatus(node)
 
-	onDiskReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
-	orphanedReplicaDirectoryNames := m.getOnDiskOrphanedReplicaDirectoryNames(node, onDiskReplicaDirectoryNames)
+	onDiksDiskReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
+	m.updateState(node, onDiksDiskReplicaDirectoryNames)
 
-	m.onDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
-
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	for id, names := range orphanedReplicaDirectoryNames {
-		node.Status.DiskStatus[id].OrphanedReplicaDirectoryNames = names
-	}
-
-	m.node = *node
-
-	key := m.node.Namespace + "/" + m.node.Name
+	key := m.state.Node.Namespace + "/" + m.state.Node.Name
 	m.syncCallback(key)
 
 	return nil
+}
+
+func (m *NodeMonitor) updateState(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+
+	m.state.Node = node.DeepCopy()
+	m.state.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
+	m.state.Revision++
 }
 
 func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) {
@@ -263,6 +274,11 @@ func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[st
 	result := make(map[string]map[string]string, 0)
 
 	for id, disk := range node.Spec.Disks {
+		// Don't create orphan CRs for the on-disk data in evicted disks or on evicted nodes.
+		if node.Spec.EvictionRequested || node.Spec.Disks[id].EvictionRequested {
+			continue
+		}
+
 		replicaDirectoryNames, err := util.GetReplicaDirectoryNames(disk.Path)
 		if err != nil {
 			logrus.Warnf("Unable to get replica directories in disk %v on node %v since %v", disk.Path, node.Name, err.Error())
@@ -272,39 +288,6 @@ func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[st
 	}
 
 	return result
-}
-
-func (m *NodeMonitor) getOnDiskOrphanedReplicaDirectoryNames(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) map[string]map[string]string {
-	orphanedReplicaDirectoryNames := make(map[string]map[string]string, 0)
-
-	for diskID, names := range onDiskReplicaDirectoryNames {
-		if reflect.DeepEqual(names, m.onDiskReplicaDirectoryNames[diskID]) {
-			logrus.Infof("Replica directories in disk %v on node %v is not changed", diskID, node.Name)
-			if _, exist := node.Status.DiskStatus[diskID]; exist {
-				orphanedReplicaDirectoryNames[diskID] = copyMap(node.Status.DiskStatus[diskID].OrphanedReplicaDirectoryNames)
-			}
-		} else {
-			logrus.Infof("Replica directories in disk %v on node %v is changed", diskID, node.Name)
-			orphanedReplicaDirectoryNames[diskID] = copyMap(names)
-			for replicaName := range node.Status.DiskStatus[diskID].ScheduledReplica {
-				replica, err := m.ds.GetReplica(replicaName)
-				if err != nil {
-					continue
-				}
-				delete(orphanedReplicaDirectoryNames[diskID], replica.Spec.DataDirectoryName)
-			}
-		}
-	}
-
-	return orphanedReplicaDirectoryNames
-}
-
-func copyMap(m map[string]string) map[string]string {
-	n := make(map[string]string)
-	for k, v := range m {
-		n[k] = v
-	}
-	return n
 }
 
 func (m *NodeMonitor) getDiskInfoMap(node *longhorn.Node) map[string]*diskInfo {
@@ -337,4 +320,12 @@ func (m *NodeMonitor) isFSIDDuplicatedWithExistingReadyDisk(name string, disks [
 	}
 
 	return false
+}
+
+func copyMap(m map[string]string) map[string]string {
+	n := make(map[string]string)
+	for k, v := range m {
+		n[k] = v
+	}
+	return n
 }

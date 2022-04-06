@@ -432,8 +432,8 @@ func GetShareManagerImageChecksumName(image string) string {
 	return shareManagerImagePrefix + util.GetStringChecksum(strings.TrimSpace(image))[:ImageChecksumNameLength]
 }
 
-func GetOrphanChecksumName(name string) string {
-	return orphanPrefix + util.GetStringChecksumSHA256(strings.TrimSpace(name))
+func GetOrphanChecksumName(name, diskID, nodeID string) string {
+	return orphanPrefix + util.GetStringChecksumSHA256(strings.TrimSpace(fmt.Sprintf("%s-%s-%s", name, diskID, nodeID)))
 }
 
 func GetShareManagerPodNameFromShareManagerName(smName string) string {

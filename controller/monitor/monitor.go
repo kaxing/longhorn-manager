@@ -15,7 +15,7 @@ type Monitor interface {
 	Close()
 
 	SyncState() error
-	GetState() interface{}
+	GetState() (interface{}, error)
 }
 
 type baseMonitor struct {

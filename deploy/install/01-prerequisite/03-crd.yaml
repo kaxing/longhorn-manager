@@ -1872,10 +1872,6 @@ spec:
                       type: array
                     diskUUID:
                       type: string
-                    orphanedReplicaDirectoryNames:
-                      additionalProperties:
-                        type: string
-                      type: object
                     scheduledReplica:
                       additionalProperties:
                         format: int64
@@ -1939,14 +1935,6 @@ spec:
     - description: The node that the orphan is on
       jsonPath: .spec.nodeID
       name: Node
-      type: string
-    - description: The disk that the orphan is on
-      jsonPath: .spec.parameters['DiskPath']
-      name: Disk
-      type: string
-    - description: The current file or directory name of the orphan
-      jsonPath: .spec.parameters['DataName']
-      name: Data
       type: string
     name: v1beta2
     schema:

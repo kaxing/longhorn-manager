@@ -793,13 +793,6 @@ func (in *DiskStatus) DeepCopyInto(out *DiskStatus) {
 			(*out)[key] = val
 		}
 	}
-	if in.OrphanedReplicaDirectoryNames != nil {
-		in, out := &in.OrphanedReplicaDirectoryNames, &out.OrphanedReplicaDirectoryNames
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
-		}
-	}
 	return
 }
 

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jinzhu/copier"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
@@ -27,14 +28,20 @@ const (
 type FakeNodeMonitor struct {
 	*baseMonitor
 
-	node longhorn.Node
-	lock sync.RWMutex
+	stateLock sync.RWMutex
+	state     *FakeNodeMonitorState
 
 	syncCallback func(key string)
 
 	getDiskInfoHandler GetDiskInfoHandler
 	getDiskConfig      GetDiskConfig
 	generateDiskConfig GenerateDiskConfig
+}
+
+type FakeNodeMonitorState struct {
+	Revision                    int64
+	Node                        *longhorn.Node
+	OnDiskReplicaDirectoryNames map[string]map[string]string
 }
 
 func NewFakeNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRecorder,
@@ -44,8 +51,12 @@ func NewFakeNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRec
 	m := &FakeNodeMonitor{
 		baseMonitor: newBaseMonitor(logger, eventRecorder, ds, FakeNodeMonitorSyncPeriod, ctx, quit),
 
-		node: *node,
-		lock: sync.RWMutex{},
+		stateLock: sync.RWMutex{},
+		state: &FakeNodeMonitorState{
+			Revision:                    0,
+			Node:                        node.DeepCopy(),
+			OnDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
+		},
 
 		syncCallback: syncCallback,
 
@@ -61,7 +72,6 @@ func (m *FakeNodeMonitor) Start() {
 	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
 		if err := m.SyncState(); err != nil {
 			m.logger.Errorf("Stop monitoring because of %v", err)
-			m.Close()
 		}
 		return false, nil
 	}, m.ctx.Done())
@@ -71,26 +81,40 @@ func (m *FakeNodeMonitor) Close() {
 	m.quit()
 }
 
-func (m *FakeNodeMonitor) GetState() interface{} {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
-	return m.node.DeepCopy()
+func (m *FakeNodeMonitor) GetState() (interface{}, error) {
+	m.stateLock.RLock()
+	defer m.stateLock.RUnlock()
+
+	state := &NodeMonitorState{}
+	if err := copier.Copy(state, m.state); err != nil {
+		return nil, errors.Wrapf(err, "failed to copy node monitor state")
+	}
+
+	return state, nil
 }
 
 func (m *FakeNodeMonitor) SyncState() error {
-	node, err := m.ds.GetNode(m.node.Name)
+	node, err := m.ds.GetNode(m.state.Node.Name)
 	if err != nil {
-		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.node.Name)
+		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.state.Node.Name)
 		return err
 	}
 
 	m.syncDiskStatus(node)
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	m.node = *node
+	onDiksDiskReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
+	m.updateState(node, onDiksDiskReplicaDirectoryNames)
 
 	return nil
+}
+
+func (m *FakeNodeMonitor) updateState(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) {
+	m.stateLock.Lock()
+	defer m.stateLock.Unlock()
+
+	m.state.Node = node.DeepCopy()
+	m.state.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
+	m.state.Revision++
 }
 
 func (m *FakeNodeMonitor) syncDiskStatus(node *longhorn.Node) {
@@ -232,6 +256,12 @@ func (m *FakeNodeMonitor) updateDiskStatusReadyCondition(node *longhorn.Node) {
 			diskStatusMap[id] = diskStatus
 		}
 	}
+}
+
+func (m *FakeNodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[string]map[string]string {
+	result := make(map[string]map[string]string, 0)
+
+	return result
 }
 
 func (m *FakeNodeMonitor) getDiskInfoMap(node *longhorn.Node) map[string]*diskInfo {
