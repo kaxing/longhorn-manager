@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
@@ -58,6 +59,10 @@ const (
 
 	SizeAlignment     = 2 * 1024 * 1024
 	MinimalVolumeSize = 10 * 1024 * 1024
+
+	RandomIDLenth = 8
+
+	volumeMetaData = "volume.meta"
 )
 
 var (
@@ -85,6 +90,18 @@ type DiskInfo struct {
 	BlockSize        int64
 	StorageMaximum   int64
 	StorageAvailable int64
+}
+
+type VolumeMeta struct {
+	Size            int64
+	Head            string
+	Dirty           bool
+	Rebuilding      bool
+	Error           string
+	Parent          string
+	SectorSize      int64
+	BackingFilePath string
+	BackingFile     interface{}
 }
 
 func ConvertSize(size interface{}) (int64, error) {
@@ -161,7 +178,13 @@ func WaitForDevice(dev string, timeout int) error {
 }
 
 func RandomID() string {
-	return UUID()[:8]
+	return UUID()[:RandomIDLenth]
+}
+
+func ValidateRandomID(id string) bool {
+	regex := fmt.Sprintf(`^[a-zA-Z0-9]{%d}$`, RandomIDLenth)
+	validName := regexp.MustCompile(regex)
+	return validName.MatchString(id)
 }
 
 func GetLocalIPs() ([]string, error) {
@@ -394,6 +417,15 @@ func GetStringChecksum(data string) string {
 
 func GetChecksumSHA512(data []byte) string {
 	checksum := sha512.Sum512(data)
+	return hex.EncodeToString(checksum[:])
+}
+
+func GetStringChecksumSHA256(data string) string {
+	return GetChecksumSHA256([]byte(data))
+}
+
+func GetChecksumSHA256(data []byte) string {
+	checksum := sha256.Sum256(data)
 	return hex.EncodeToString(checksum[:])
 }
 
@@ -786,4 +818,92 @@ func Contains(list []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string]string, err error) {
+	defer func() {
+		err = errors.Wrapf(err, "cannot list replica directories in the disk %v", diskPath)
+	}()
+
+	replicaDirectoryNames = make(map[string]string, 0)
+
+	directory := filepath.Join(diskPath, "replicas")
+
+	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
+	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
+	output, err := Execute([]string{}, "nsenter", mountPath, "ls", directory)
+	if err != nil {
+		return replicaDirectoryNames, err
+	}
+
+	names := strings.Split(output, "\n")
+	for _, name := range names {
+		if len(name) == 0 || !isReplicaDirectoryNameValid(name) {
+			continue
+		}
+
+		if ok, err := isVolumeMetaFileExist(diskPath, name); err != nil || !ok {
+			continue
+		}
+
+		replicaDirectoryNames[name] = ""
+	}
+
+	return replicaDirectoryNames, nil
+}
+
+func DeleteReplicaDirectoryName(diskPath, replicaDirectoryName string) (err error) {
+	defer func() {
+		err = errors.Wrapf(err, "cannot delete replica directory %v in disk %v", replicaDirectoryName, diskPath)
+	}()
+
+	if len(diskPath) == 0 {
+		return errors.New(fmt.Sprintf("invalid disk path %v", diskPath))
+	}
+
+	if !isReplicaDirectoryNameValid(replicaDirectoryName) {
+		return errors.New(fmt.Sprintf("invalid replica directory name %v", replicaDirectoryName))
+	}
+
+	path := filepath.Join(diskPath, "replicas", replicaDirectoryName)
+
+	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
+	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
+	_, err = Execute([]string{}, "nsenter", mountPath, "rm", "-rf", path)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func isReplicaDirectoryNameValid(name string) bool {
+	if !strings.HasPrefix(name, "pvc-") || len(name) < RandomIDLenth || strings.Count(name, "-") < 2 {
+		return false
+	}
+
+	return ValidateRandomID(name[len(name)-RandomIDLenth:])
+}
+
+func isVolumeMetaFileExist(diskPath, replicaDirectoryName string) (bool, error) {
+	var meta VolumeMeta
+
+	path := filepath.Join(diskPath, "replicas", replicaDirectoryName, volumeMetaData)
+
+	if err := unmarshalFile(path, &meta); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func unmarshalFile(path string, obj interface{}) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	return dec.Decode(obj)
 }
