@@ -1043,7 +1043,7 @@ func (nc *NodeController) syncWithMonitor(mon monitor.Monitor, node *longhorn.No
 
 	state := v.(*monitor.NodeMonitorState)
 
-	if nc.monitorStateRevision == state.Revision {
+	if nc.monitorStateRevision == state.Revision ||
 		!isMonitoredNodeDiskStatusIsUpdated(node, state.Node) {
 		return nil, errors.New("node disk status is not updated yet")
 	}
