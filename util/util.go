@@ -61,6 +61,8 @@ const (
 	MinimalVolumeSize = 10 * 1024 * 1024
 
 	RandomIDLenth = 8
+
+	volumeMetaData = "volume.meta"
 )
 
 var (
@@ -88,6 +90,18 @@ type DiskInfo struct {
 	BlockSize        int64
 	StorageMaximum   int64
 	StorageAvailable int64
+}
+
+type VolumeMeta struct {
+	Size            int64
+	Head            string
+	Dirty           bool
+	Rebuilding      bool
+	Error           string
+	Parent          string
+	SectorSize      int64
+	BackingFilePath string
+	BackingFile     interface{}
 }
 
 func ConvertSize(size interface{}) (int64, error) {
@@ -827,6 +841,11 @@ func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string
 		if len(name) == 0 || !isReplicaDirectoryNameValid(name) {
 			continue
 		}
+
+		if ok, err := isVolumeMetaFileExist(diskPath, name); err != nil || !ok {
+			continue
+		}
+
 		replicaDirectoryNames[name] = ""
 	}
 
@@ -864,4 +883,27 @@ func isReplicaDirectoryNameValid(name string) bool {
 	}
 
 	return ValidateRandomID(name[len(name)-RandomIDLenth:])
+}
+
+func isVolumeMetaFileExist(diskPath, replicaDirectoryName string) (bool, error) {
+	var meta VolumeMeta
+
+	path := filepath.Join(diskPath, "replicas", replicaDirectoryName, volumeMetaData)
+
+	if err := unmarshalFile(path, &meta); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func unmarshalFile(path string, obj interface{}) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	return dec.Decode(obj)
 }
