@@ -28,8 +28,6 @@ import (
 	"github.com/longhorn/longhorn-manager/util"
 )
 
-var nodeControllerResyncPeriod = 30 * time.Second
-
 type NodeController struct {
 	*baseController
 
@@ -40,8 +38,7 @@ type NodeController struct {
 	kubeClient    clientset.Interface
 	eventRecorder record.EventRecorder
 
-	monitor              monitor.Monitor
-	monitorStateRevision int64
+	monitor monitor.Monitor
 
 	ds *datastore.DataStore
 
@@ -84,11 +81,11 @@ func NewNodeController(
 
 	// We want to check the real time usage of disk on nodes.
 	// Therefore, we add a small resync for the NodeInformer here
-	ds.NodeInformer.AddEventHandlerWithResyncPeriod(cache.ResourceEventHandlerFuncs{
+	ds.NodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    nc.enqueueNode,
 		UpdateFunc: func(old, cur interface{}) { nc.enqueueNode(cur) },
 		DeleteFunc: nc.enqueueNode,
-	}, nodeControllerResyncPeriod)
+	})
 
 	nc.cacheSyncs = append(nc.cacheSyncs, ds.NodeInformer.HasSynced)
 
@@ -889,7 +886,6 @@ func (nc *NodeController) checkMonitor(node *longhorn.Node) (monitor.Monitor, er
 	}
 
 	nc.monitor = monitor
-	nc.monitorStateRevision = 0
 
 	return monitor, nil
 }
@@ -989,9 +985,7 @@ func (nc *NodeController) createOrphans(node *longhorn.Node, onDiskReplicaDirect
 
 	// Now, the replica directories in onDiskReplicaDirectoryNames are orphaned, so we can create orphan resources for them.
 	for diskID, names := range onDiskReplicaDirectoryNames {
-		logrus.Infof("Deubg ===> diskID=%v, names=%v", diskID, names)
 		for name := range names {
-			logrus.Infof("Deubg ===> name=%v", name)
 			if err := nc.createOrphan(node, name, diskID); err != nil && !apierrors.IsAlreadyExists(err) {
 				return errors.Wrapf(err, "unable to create orphan for orphaned replica directory %v in disk %v on node %v",
 					name, node.Spec.Disks[diskID].Path, node.Name)
@@ -1043,12 +1037,9 @@ func (nc *NodeController) syncWithMonitor(mon monitor.Monitor, node *longhorn.No
 
 	state := v.(*monitor.NodeMonitorState)
 
-	if nc.monitorStateRevision == state.Revision ||
-		!isMonitoredNodeDiskStatusIsUpdated(node, state.Node) {
-		return nil, errors.New("node disk status is not updated yet")
+	if !isMonitoredNodeDiskStatusIsUpdated(node, state.Node) {
+		return nil, errors.New("node disk status is not updated")
 	}
-
-	nc.monitorStateRevision = state.Revision
 
 	return state, nil
 }

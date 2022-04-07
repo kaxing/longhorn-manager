@@ -37,7 +37,6 @@ type NodeMonitor struct {
 }
 
 type NodeMonitorState struct {
-	Revision                    int64
 	Node                        *longhorn.Node
 	OnDiskReplicaDirectoryNames map[string]map[string]string
 }
@@ -55,7 +54,6 @@ func NewNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRecorde
 
 		stateLock: sync.RWMutex{},
 		state: &NodeMonitorState{
-			Revision:                    0,
 			Node:                        node.DeepCopy(),
 			OnDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
 		},
@@ -126,7 +124,6 @@ func (m *NodeMonitor) updateState(node *longhorn.Node, onDiskReplicaDirectoryNam
 
 	m.state.Node = node.DeepCopy()
 	m.state.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
-	m.state.Revision++
 }
 
 func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) {
