@@ -50,7 +50,7 @@ func NewFakeNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRec
 		stateLock: sync.RWMutex{},
 		state: &NodeMonitorState{
 			Node:                        node.DeepCopy(),
-			OnDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
+			OnDiskReplicaDirectoryNames: make(map[string]map[string]*util.Entry, 0),
 		},
 
 		syncCallback: syncCallback,
@@ -107,7 +107,7 @@ func (m *FakeNodeMonitor) SyncState() error {
 	return nil
 }
 
-func (m *FakeNodeMonitor) updateState(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) {
+func (m *FakeNodeMonitor) updateState(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]*util.Entry) {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 
@@ -256,8 +256,8 @@ func (m *FakeNodeMonitor) updateDiskStatusReadyCondition(node *longhorn.Node) {
 	}
 }
 
-func (m *FakeNodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) (map[string]map[string]string, error) {
-	result := make(map[string]map[string]string, 0)
+func (m *FakeNodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) (map[string]map[string]*util.Entry, error) {
+	result := make(map[string]map[string]*util.Entry, 0)
 
 	// Add active and orphaned replica directories
 	replicas, err := m.ds.ListReplicasByNodeRO(node.Name)
@@ -266,18 +266,28 @@ func (m *FakeNodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) (m
 	}
 	for _, replica := range replicas {
 		if result[replica.Spec.DiskID] == nil {
-			result[replica.Spec.DiskID] = make(map[string]string)
+			result[replica.Spec.DiskID] = make(map[string]*util.Entry)
 		}
 
-		result[replica.Spec.DiskID][replica.Spec.DataDirectoryName] = ""
+		entry := &util.Entry{
+			Parameters: map[string]string{
+				util.EntryChangedTime: "0",
+			},
+		}
+		result[replica.Spec.DiskID][replica.Spec.DataDirectoryName] = entry
 	}
 
 	// Add orphaned replica directory in each disk
 	for id := range node.Spec.Disks {
 		if result[id] == nil {
-			result[id] = make(map[string]string)
+			result[id] = make(map[string]*util.Entry)
 		}
-		result[id][TestOrphanedReplicaDirectoryName] = ""
+		entry := &util.Entry{
+			Parameters: map[string]string{
+				util.EntryChangedTime: "0",
+			},
+		}
+		result[id][TestOrphanedReplicaDirectoryName] = entry
 	}
 
 	return result, nil

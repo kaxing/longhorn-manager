@@ -9,14 +9,16 @@ const (
 )
 
 const (
-	OrphanConditionTypeDeletable = "Deletable"
+	OrphanConditionTypeDeletable       = "Deletable"
+	OrphanConditionTypeLastChangedTime = "LastChangedTime"
 )
 
 const (
-	OrphanDataName = "DataName"
-	OrphanDiskFsid = "DiskFsid"
-	OrphanDiskUUID = "DiskUUID"
-	OrphanDiskPath = "DiskPath"
+	OrphanDataName        = "DataName"
+	OrphanDataChangedTime = "DataChangedTime"
+	OrphanDiskFsid        = "DiskFsid"
+	OrphanDiskUUID        = "DiskUUID"
+	OrphanDiskPath        = "DiskPath"
 )
 
 // OrphanSpec defines the desired state of the Longhorn orphaned data

@@ -38,7 +38,7 @@ type NodeMonitor struct {
 
 type NodeMonitorState struct {
 	Node                        *longhorn.Node
-	OnDiskReplicaDirectoryNames map[string]map[string]string
+	OnDiskReplicaDirectoryNames map[string]map[string]*util.Entry
 }
 
 type GetDiskInfoHandler func(string) (*util.DiskInfo, error)
@@ -55,7 +55,7 @@ func NewNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRecorde
 		stateLock: sync.RWMutex{},
 		state: &NodeMonitorState{
 			Node:                        node.DeepCopy(),
-			OnDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
+			OnDiskReplicaDirectoryNames: make(map[string]map[string]*util.Entry, 0),
 		},
 
 		syncCallback: syncCallback,
@@ -118,7 +118,7 @@ func (m *NodeMonitor) SyncState() error {
 	return nil
 }
 
-func (m *NodeMonitor) updateState(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) {
+func (m *NodeMonitor) updateState(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]*util.Entry) {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
 
@@ -267,8 +267,8 @@ func (m *NodeMonitor) updateDiskStatusReadyCondition(node *longhorn.Node) {
 	}
 }
 
-func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[string]map[string]string {
-	result := make(map[string]map[string]string, 0)
+func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[string]map[string]*util.Entry {
+	result := make(map[string]map[string]*util.Entry, 0)
 
 	for id, disk := range node.Spec.Disks {
 		// Don't create orphan CRs for the on-disk data in evicted disks or on evicted nodes.

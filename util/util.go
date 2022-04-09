@@ -820,24 +820,37 @@ func Contains(list []string, item string) bool {
 	return false
 }
 
-func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string]string, err error) {
+const (
+	EntryChangedTime = "changedTime"
+)
+
+type Entry struct {
+	Parameters map[string]string
+}
+
+func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string]*Entry, err error) {
 	defer func() {
 		err = errors.Wrapf(err, "cannot list replica directories in the disk %v", diskPath)
 	}()
 
-	replicaDirectoryNames = make(map[string]string, 0)
+	replicaDirectoryNames = make(map[string]*Entry, 0)
 
 	directory := filepath.Join(diskPath, "replicas")
 
 	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
 	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
-	output, err := Execute([]string{}, "nsenter", mountPath, "ls", directory)
+	cmd := fmt.Sprintf("cd %s; stat --format='%%n %%f %%Y' *", directory)
+	output, err := Execute([]string{}, "nsenter", mountPath, "sh", "-c", cmd)
 	if err != nil {
 		return replicaDirectoryNames, err
 	}
 
-	names := strings.Split(output, "\n")
-	for _, name := range names {
+	entries, err := parseStatOutput(output)
+	if err != nil {
+		return replicaDirectoryNames, err
+	}
+
+	for name, entry := range entries {
 		if len(name) == 0 || !isReplicaDirectoryNameValid(name) {
 			continue
 		}
@@ -846,10 +859,39 @@ func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string
 			continue
 		}
 
-		replicaDirectoryNames[name] = ""
+		replicaDirectoryNames[name] = entry
 	}
 
 	return replicaDirectoryNames, nil
+}
+
+func parseStatOutput(output string) (map[string]*Entry, error) {
+	entries := map[string]*Entry{}
+
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		tokens := strings.Fields(line)
+		if len(tokens) != 3 {
+			continue
+		}
+
+		mode, err := strconv.ParseInt(tokens[1], 16, 64)
+		if err != nil {
+			return nil, err
+		}
+
+		if (syscall.S_IFMT & mode) != syscall.S_IFDIR {
+			continue
+		}
+
+		entry := &Entry{
+			Parameters: map[string]string{
+				EntryChangedTime: tokens[2],
+			},
+		}
+		entries[tokens[0]] = entry
+	}
+	return entries, nil
 }
 
 func DeleteReplicaDirectoryName(diskPath, replicaDirectoryName string) (err error) {
@@ -906,4 +948,8 @@ func unmarshalFile(path string, obj interface{}) error {
 
 	dec := json.NewDecoder(f)
 	return dec.Decode(obj)
+}
+
+func EpochTimestampToHumanReadableTime(timestamp int64) string {
+	return time.Unix(timestamp, 0).Format(time.RFC3339)
 }

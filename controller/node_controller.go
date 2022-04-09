@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
@@ -893,7 +894,7 @@ func (nc *NodeController) enqueueNodeForMonitor(key string) {
 	nc.queue.Add(key)
 }
 
-func (nc *NodeController) syncOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) error {
+func (nc *NodeController) syncOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]*util.Entry) error {
 	if err := nc.cleanupOrphans(node, onDiskReplicaDirectoryNames); err != nil {
 		return errors.Wrapf(err, "failed to clean up orphans")
 	}
@@ -915,7 +916,7 @@ func (nc *NodeController) syncOrphans(node *longhorn.Node, onDiskReplicaDirector
 	return nil
 }
 
-func (nc *NodeController) cleanupOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) error {
+func (nc *NodeController) cleanupOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]*util.Entry) error {
 	labelSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: map[string]string{
 			types.GetLonghornLabelKey(types.LonghornLabelNode): nc.controllerID,
@@ -985,7 +986,7 @@ func isDiskUUIDChanged(node *longhorn.Node, orphan *longhorn.Orphan) bool {
 	return false
 }
 
-func (nc *NodeController) createOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) error {
+func (nc *NodeController) createOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]*util.Entry) error {
 	// Find out the orphaned directories by checking with replica CRs
 	for diskID := range onDiskReplicaDirectoryNames {
 		for replicaName := range node.Status.DiskStatus[diskID].ScheduledReplica {
@@ -1003,8 +1004,8 @@ func (nc *NodeController) createOrphans(node *longhorn.Node, onDiskReplicaDirect
 
 	// Now, the replica directories in onDiskReplicaDirectoryNames are orphaned, so we can create orphan resources for them.
 	for diskID, names := range onDiskReplicaDirectoryNames {
-		for name := range names {
-			if err := nc.createOrphan(node, name, diskID); err != nil && !apierrors.IsAlreadyExists(err) {
+		for name, entry := range names {
+			if err := nc.createOrphan(node, diskID, name, entry.Parameters[util.EntryChangedTime]); err != nil && !apierrors.IsAlreadyExists(err) {
 				return errors.Wrapf(err, "unable to create orphan for orphaned replica directory %v in disk %v on node %v",
 					name, node.Spec.Disks[diskID].Path, node.Name)
 			}
@@ -1014,11 +1015,16 @@ func (nc *NodeController) createOrphans(node *longhorn.Node, onDiskReplicaDirect
 	return nil
 }
 
-func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName, id string) error {
-	orphanName := types.GetOrphanChecksumName(replicaDirectoryName, id, node.Name)
+func (nc *NodeController) createOrphan(node *longhorn.Node, diskID, replicaDirectoryName, lastChangedTime string) error {
+	orphanName := types.GetOrphanChecksumName(replicaDirectoryName, diskID, node.Name)
 
 	_, err := nc.ds.GetOrphanRO(orphanName)
 	if err == nil || (err != nil && !apierrors.IsNotFound(err)) {
+		return err
+	}
+
+	ctime, err := strconv.ParseInt(lastChangedTime, 10, 64)
+	if err != nil {
 		return err
 	}
 
@@ -1030,10 +1036,11 @@ func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName
 			NodeID: node.Name,
 			Type:   longhorn.OrphanTypeReplicaDirectory,
 			Parameters: map[string]string{
-				longhorn.OrphanDataName: replicaDirectoryName,
-				longhorn.OrphanDiskFsid: id,
-				longhorn.OrphanDiskUUID: node.Status.DiskStatus[id].DiskUUID,
-				longhorn.OrphanDiskPath: node.Spec.Disks[id].Path,
+				longhorn.OrphanDataName:        replicaDirectoryName,
+				longhorn.OrphanDataChangedTime: util.EpochTimestampToHumanReadableTime(ctime),
+				longhorn.OrphanDiskFsid:        diskID,
+				longhorn.OrphanDiskUUID:        node.Status.DiskStatus[diskID].DiskUUID,
+				longhorn.OrphanDiskPath:        node.Spec.Disks[diskID].Path,
 			},
 		},
 	}
