@@ -10,7 +10,7 @@ import (
 
 	"github.com/longhorn/longhorn-instance-manager/pkg/api"
 	"github.com/longhorn/longhorn-instance-manager/pkg/meta"
-	"github.com/longhorn/longhorn-instance-manager/pkg/rpc"
+	rpc "github.com/longhorn/longhorn-instance-manager/pkg/lhrpc"
 	"github.com/longhorn/longhorn-instance-manager/pkg/types"
 )
 
