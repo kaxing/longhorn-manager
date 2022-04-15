@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -421,15 +422,16 @@ func (nc *NodeController) syncNode(key string) (err error) {
 		return err
 	}
 
-	state, err := nc.syncWithMonitor(mon, node)
+	collectedData, err := nc.syncWithMonitor(mon, node)
 	if err != nil {
+		if strings.Contains(err.Error(), "conflict disk status") {
+			return nil
+		}
 		return err
-
 	}
 
 	// sync disks status on current node
-	node.Status.DiskStatus = state.Node.Status.DiskStatus
-	if err := nc.syncDiskStatus(node); err != nil {
+	if err := nc.syncDiskStatus(node, collectedData); err != nil {
 		return err
 	}
 	// sync mount propagation status on current node
@@ -449,7 +451,7 @@ func (nc *NodeController) syncNode(key string) (err error) {
 		return err
 	}
 
-	if err := nc.syncOrphans(node, state.OnDiskReplicaDirectoryNames); err != nil {
+	if err := nc.syncOrphans(node, collectedData.OnDiskReplicaDirectoryNames); err != nil {
 		return err
 	}
 
@@ -544,7 +546,41 @@ func (nc *NodeController) enqueueKubernetesNode(obj interface{}) {
 	nc.enqueueNode(nodeRO)
 }
 
-func (nc *NodeController) syncDiskStatus(node *longhorn.Node) error {
+func (nc *NodeController) syncDiskStatus(node *longhorn.Node, collectedData *monitor.NodeMonitorCollectedData) error {
+	diskInfoMap := collectedData.DiskInfoMap
+	diskStatusMap := collectedData.DiskStatusMap
+
+	pruneDiskStatus(node)
+
+	// Update ready condition
+	for id, status := range diskStatusMap {
+		if node.Status.DiskStatus[id] == nil {
+			node.Status.DiskStatus[id] = &longhorn.DiskStatus{}
+		}
+
+		node.Status.DiskStatus[id].DiskUUID = status.DiskUUID
+
+		condition := types.GetCondition(status.Conditions, longhorn.DiskConditionTypeReady)
+		if condition.Status == longhorn.ConditionStatusTrue {
+			// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
+			// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
+			const truncateTo = 100 * 1024 * 1024
+
+			usableStorage := (diskInfoMap[id].Entry.StorageAvailable / truncateTo) * truncateTo
+			node.Status.DiskStatus[id].StorageAvailable = usableStorage
+			node.Status.DiskStatus[id].StorageMaximum = diskInfoMap[id].Entry.StorageMaximum
+		}
+
+		eventType := v1.EventTypeNormal
+		if condition.Status == longhorn.ConditionStatusFalse {
+			eventType = v1.EventTypeWarning
+		}
+
+		node.Status.DiskStatus[id].Conditions = types.SetConditionAndRecord(node.Status.DiskStatus[id].Conditions,
+			condition.Type, condition.Status, condition.Reason, condition.Message,
+			nc.eventRecorder, node, eventType)
+	}
+
 	return nc.updateDiskStatusSchedulableCondition(node)
 }
 
@@ -877,7 +913,7 @@ func (nc *NodeController) checkMonitor(node *longhorn.Node) (monitor.Monitor, er
 		return nc.monitor, nil
 	}
 
-	monitor, err := monitor.NewNodeMonitor(nc.logger, nc.eventRecorder, nc.ds, node, nc.enqueueNodeForMonitor)
+	monitor, err := monitor.NewNodeMonitor(nc.logger, nc.ds, node, nc.enqueueNodeForMonitor)
 	if err != nil {
 		return nil, err
 	}
@@ -985,34 +1021,55 @@ func (nc *NodeController) syncWithMonitor(mon monitor.Monitor, node *longhorn.No
 	}
 
 	if v == nil {
-		return nil, errors.New("cannot find state in monitor")
+		return nil, errors.New("cannot find collected data in monitor")
 	}
 
-	state := v.(*monitor.NodeMonitorCollectedData)
-
-	if !isMonitoredNodeDiskStatusIsUpdated(node, state.Node) {
-		return nil, errors.New("node disk status is not updated")
+	collectedData := v.(*monitor.NodeMonitorCollectedData)
+	if isDiskConflict(node, collectedData.DiskStatusMap) {
+		return nil, errors.New("conflict disk status")
 	}
-
-	return state, nil
+	return collectedData, nil
 }
 
-func isMonitoredNodeDiskStatusIsUpdated(node *longhorn.Node, monitoredNode *longhorn.Node) bool {
-	if len(node.Spec.Disks) != len(monitoredNode.Status.DiskStatus) {
-		return false
+func isDiskConflict(node *longhorn.Node, diskStatus map[string]*longhorn.DiskStatus) bool {
+	if len(node.Spec.Disks) != len(diskStatus) {
+		return true
 	}
 
 	for id := range node.Spec.Disks {
-		status, exist := monitoredNode.Status.DiskStatus[id]
-		if !exist {
-			return false
-		}
-
-		condition := types.GetCondition(status.Conditions, longhorn.DiskConditionTypeReady)
-		if condition.Status != longhorn.ConditionStatusTrue && condition.Status != longhorn.ConditionStatusFalse {
-			return false
+		if _, ok := diskStatus[id]; !ok {
+			return true
 		}
 	}
 
-	return true
+	return false
+}
+
+func pruneDiskStatus(node *longhorn.Node) {
+	if node.Status.DiskStatus == nil {
+		node.Status.DiskStatus = map[string]*longhorn.DiskStatus{}
+	}
+
+	for id := range node.Spec.Disks {
+		if node.Status.DiskStatus[id] == nil {
+			node.Status.DiskStatus[id] = &longhorn.DiskStatus{}
+		}
+		diskStatus := node.Status.DiskStatus[id]
+		if diskStatus.Conditions == nil {
+			diskStatus.Conditions = []longhorn.Condition{}
+		}
+		if diskStatus.ScheduledReplica == nil {
+			diskStatus.ScheduledReplica = map[string]int64{}
+		}
+		// When condition are not ready, the old storage data should be cleaned.
+		diskStatus.StorageMaximum = 0
+		diskStatus.StorageAvailable = 0
+		node.Status.DiskStatus[id] = diskStatus
+	}
+
+	for id := range node.Status.DiskStatus {
+		if _, exists := node.Spec.Disks[id]; !exists {
+			delete(node.Status.DiskStatus, id)
+		}
+	}
 }
