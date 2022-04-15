@@ -240,25 +240,13 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 			return err
 		}
 
-		if node.Spec.EvictionRequested {
-			return nil
-		}
-
 		id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-		if disk, ok := node.Spec.Disks[id]; ok {
-			if disk.EvictionRequested {
-				return nil
-			}
-		} else {
-			log.Debugf("Only delete the orphan resource object since disk %v on node %v does not exist", id, node.Name)
-			return nil
-		}
-
-		if node.Status.DiskStatus[id].DiskUUID == orphan.Spec.Parameters[longhorn.OrphanDiskUUID] {
+		if node.Status.DiskStatus[id].DiskUUID == orphan.Spec.Parameters[longhorn.OrphanDiskUUID] &&
+			types.GetCondition(orphan.Status.Conditions, longhorn.OrphanConditionTypeUnavailable).Status == longhorn.ConditionStatusFalse {
 			err := oc.deleteOrphanedData(orphan)
 			if err != nil && !apierrors.IsNotFound(err) {
 				orphan.Status.Conditions = types.SetCondition(orphan.Status.Conditions,
-					longhorn.OrphanConditionTypeDeletable, longhorn.ConditionStatusFalse, "", err.Error())
+					longhorn.OrphanConditionTypeError, longhorn.ConditionStatusTrue, "", err.Error())
 				log.WithError(err).Errorf("error deleting orphan %v data", orphan.Name)
 				return err
 			}
@@ -267,16 +255,22 @@ func (oc *OrphanController) reconcile(orphanName string) (err error) {
 	}
 
 	existingOrphan := orphan.DeepCopy()
+	defer func() {
+		if err != nil {
+			return
+		}
+		if reflect.DeepEqual(existingOrphan.Status, orphan.Status) {
+			return
+		}
+		if _, err := oc.ds.UpdateOrphanStatus(orphan); err != nil && apierrors.IsConflict(errors.Cause(err)) {
+			log.WithError(err).Debugf("Requeue %v due to conflict", orphanName)
+			oc.enqueueOrphan(orphan)
+		}
+	}()
 
-	orphan.Status.Conditions = types.SetCondition(orphan.Status.Conditions,
-		longhorn.OrphanConditionTypeDeletable, longhorn.ConditionStatusTrue, "", "")
-	if reflect.DeepEqual(existingOrphan.Status, orphan.Status) {
-		return nil
-	}
-	_, err = oc.ds.UpdateOrphanStatus(orphan)
-	if err != nil && apierrors.IsConflict(errors.Cause(err)) {
-		log.WithError(err).Debugf("Requeue %v due to conflict", orphanName)
-		oc.enqueueOrphan(orphan)
+	if err := oc.updateConditions(orphan); err != nil {
+		log.WithError(err).Errorf("failed to update conditions for orphan %v", orphan.Name)
+		return err
 	}
 
 	return nil
@@ -300,4 +294,72 @@ func (oc *OrphanController) deleteOrphanedData(orphan *longhorn.Orphan) error {
 		orphan.Spec.Parameters[longhorn.OrphanDiskPath], orphan.Status.OwnerID)
 
 	return util.DeleteReplicaDirectoryName(orphan.Spec.Parameters[longhorn.OrphanDiskPath], orphan.Spec.Parameters[longhorn.OrphanDataName])
+}
+
+func (oc *OrphanController) updateConditions(orphan *longhorn.Orphan) error {
+	if err := oc.updateUnavailableCondition(orphan); err != nil {
+		return err
+	}
+
+	if types.GetCondition(orphan.Status.Conditions, longhorn.OrphanConditionTypeError).Status != longhorn.ConditionStatusTrue {
+		orphan.Status.Conditions = types.SetCondition(orphan.Status.Conditions, longhorn.OrphanConditionTypeError, longhorn.ConditionStatusFalse, "", "")
+	}
+
+	return nil
+}
+
+func (oc *OrphanController) updateUnavailableCondition(orphan *longhorn.Orphan) (err error) {
+	reason := ""
+
+	defer func() {
+		if err != nil {
+			return
+		}
+
+		status := longhorn.ConditionStatusFalse
+		if reason != "" {
+			status = longhorn.ConditionStatusTrue
+		}
+
+		orphan.Status.Conditions = types.SetCondition(orphan.Status.Conditions, longhorn.OrphanConditionTypeUnavailable, status, reason, "")
+	}()
+
+	if autoDeletion, err := oc.ds.GetSettingAsBool(types.SettingNameOrphanAutoDeletion); err == nil {
+		if autoDeletion {
+			reason = longhorn.OrphanConditionTypeUnavailableReasonAutoDeletionEnabled
+			return nil
+		}
+	} else {
+		return errors.Wrapf(err, "failed to get %v setting", types.SettingNameOrphanAutoDeletion)
+	}
+
+	if orphan.Spec.NodeID != orphan.Status.OwnerID {
+		reason = longhorn.OrphanConditionTypeUnavailableReasonNodeDown
+		return nil
+	}
+
+	node, err := oc.ds.GetNodeRO(orphan.Status.OwnerID)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get node %v", orphan.Spec.NodeID)
+		}
+		reason = longhorn.OrphanConditionTypeUnavailableReasonNodeNotFound
+		return nil
+	}
+
+	if node.Spec.EvictionRequested {
+		reason = longhorn.OrphanConditionTypeUnavailableReasonNodeEvicted
+		return nil
+	}
+
+	id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
+	if disk, ok := node.Spec.Disks[id]; ok {
+		if disk.EvictionRequested {
+			reason = longhorn.OrphanConditionTypeUnavailableReasonDiskEvicted
+		}
+	} else {
+		reason = longhorn.OrphanConditionTypeUnavailableReasonDiskNotFound
+	}
+
+	return nil
 }

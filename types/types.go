@@ -401,12 +401,12 @@ func GetRecurringJobLabelValueMap(labelType, recurringJobName string) map[string
 	}
 }
 
-func GetOrphanLabelsForOrphanedDirectory(node, diskUUID string) map[string]string {
+func GetOrphanLabelsForOrphanedDirectory(nodeID, diskUUID string) map[string]string {
 	labels := GetBaseLabelsForSystemManagedComponent()
 	labels[GetLonghornLabelComponentKey()] = LonghornLabelOrphan
-	labels[GetLonghornLabelKey(LonghornLabelOrphanType)] = string(longhorn.OrphanTypeReplicaDirectory)
-	labels[GetLonghornLabelKey(LonghornLabelNode)] = node
+	labels[LonghornNodeKey] = nodeID
 	labels[GetLonghornLabelKey(LonghornLabelDiskUUID)] = diskUUID
+	labels[GetLonghornLabelKey(LonghornLabelOrphanType)] = string(longhorn.OrphanTypeReplicaDirectory)
 	return labels
 }
 
@@ -434,8 +434,8 @@ func GetShareManagerImageChecksumName(image string) string {
 	return shareManagerImagePrefix + util.GetStringChecksum(strings.TrimSpace(image))[:ImageChecksumNameLength]
 }
 
-func GetOrphanChecksumNameForOrphanedDirectory(name, diskID, nodeID string) string {
-	return orphanPrefix + util.GetStringChecksumSHA256(strings.TrimSpace(fmt.Sprintf("%s-%s-%s", name, diskID, nodeID)))
+func GetOrphanChecksumNameForOrphanedDirectory(nodeID, diskID, dirName string) string {
+	return orphanPrefix + util.GetStringChecksumSHA256(strings.TrimSpace(fmt.Sprintf("%s-%s-%s", nodeID, diskID, dirName)))
 }
 
 func GetShareManagerPodNameFromShareManagerName(smName string) string {

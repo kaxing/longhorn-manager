@@ -14,8 +14,8 @@ type Monitor interface {
 	Start()
 	Close()
 
-	SyncState() error
-	GetState() (interface{}, error)
+	SyncCollectedData() error
+	GetCollectedData() (interface{}, error)
 }
 
 type baseMonitor struct {

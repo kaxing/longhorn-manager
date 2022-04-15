@@ -61,7 +61,7 @@ func (o *orphanMutator) Create(request *admission.Request, newObj runtime.Object
 		longhornLabels = types.GetOrphanLabelsForOrphanedDirectory(orphan.Spec.NodeID, orphan.Spec.Parameters[longhorn.OrphanDiskUUID])
 	}
 	if longhornLabels == nil {
-		return nil, werror.NewInvalidError(fmt.Sprintf("invalid orphan labels"), "")
+		return nil, werror.NewInvalidError("invalid orphan labels", "")
 	}
 	for k, v := range longhornLabels {
 		labels[k] = v

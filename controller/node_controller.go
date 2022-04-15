@@ -146,7 +146,8 @@ func (nc *NodeController) isResponsibleForSetting(obj interface{}) bool {
 	}
 
 	return types.SettingName(setting.Name) == types.SettingNameStorageMinimalAvailablePercentage ||
-		types.SettingName(setting.Name) == types.SettingNameBackingImageCleanupWaitInterval
+		types.SettingName(setting.Name) == types.SettingNameBackingImageCleanupWaitInterval ||
+		types.SettingName(setting.Name) == types.SettingNameOrphanAutoDeletion
 }
 
 func (nc *NodeController) isResponsibleForReplica(obj interface{}) bool {
@@ -891,32 +892,21 @@ func (nc *NodeController) enqueueNodeForMonitor(key string) {
 }
 
 func (nc *NodeController) syncOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) error {
-	if err := nc.cleanupOrphans(node, onDiskReplicaDirectoryNames); err != nil {
-		return errors.Wrapf(err, "failed to clean up orphans")
-	}
-
 	if err := nc.createOrphans(node, onDiskReplicaDirectoryNames); err != nil {
 		return errors.Wrapf(err, "failed to create orphans")
 	}
 
-	if autoDeletion, err := nc.ds.GetSettingAsBool(types.SettingNameOrphanAutoDeletion); err == nil {
-		if autoDeletion {
-			if err := nc.ds.DeleteAllOrphansForNode(node.Name); err != nil {
-				return errors.Wrapf(err, "failed to delete orphans for node %v", node.Name)
-			}
-		}
-	} else {
-		return errors.Wrapf(err, "failed to get %v setting", types.SettingNameOrphanAutoDeletion)
+	if err := nc.deleteOrphans(node, onDiskReplicaDirectoryNames); err != nil {
+		return errors.Wrapf(err, "failed to delete orphans")
 	}
 
 	return nil
 }
 
-func (nc *NodeController) cleanupOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) error {
-	orphans, err := nc.ds.ListOrphansByNodeRO(nc.controllerID)
+func (nc *NodeController) deleteOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) error {
+	orphans, err := nc.ds.ListOrphansRO()
 	if err != nil {
-		return errors.Wrapf(err, "unable to list orphans with label %v=%v",
-			types.GetLonghornLabelKey(types.LonghornLabelNode), nc.controllerID)
+		return errors.Wrap(err, "unable to list orphans")
 	}
 
 	for _, orphan := range orphans {
@@ -924,76 +914,32 @@ func (nc *NodeController) cleanupOrphans(node *longhorn.Node, onDiskReplicaDirec
 			continue
 		}
 
-		if orphan.Spec.NodeID == orphan.Status.OwnerID {
-			if node.Spec.EvictionRequested {
-				if err := nc.ds.DeleteOrphan(orphan.Name); err != nil {
-					return errors.Wrapf(err, "failed to delete orphan %v", orphan.Name)
-				}
-			} else {
-				// Clean up orphan CRs when
-				// 1. on-disk data is missing
-				// 2. on-disk orphaned data are on evicted or down disks
-				// 3. disk UUID is changed
-				id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-				replicaDirectoryName := orphan.Spec.Parameters[longhorn.OrphanDataName]
-				_, onDiskDataExist := onDiskReplicaDirectoryNames[id][replicaDirectoryName]
+		// If the on-disk is missing, e.g. deleted by users by manual, we need to delete the orphaned CR.
+		// Orphan controller won't stat/check the on-disk data one by one and isn't aware the of the missing replica directory,
+		// so we check and handle it here.
+		id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
+		replicaDirectoryName := orphan.Spec.Parameters[longhorn.OrphanDataName]
+		_, onDiskDataExist := onDiskReplicaDirectoryNames[id][replicaDirectoryName]
 
-				if !onDiskDataExist || isDiskDownOrEvicted(node, orphan) || isDiskUUIDChanged(node, orphan) {
-					if err := nc.ds.DeleteOrphan(orphan.Name); err != nil {
-						return errors.Wrapf(err, "failed to delete orphan %v", orphan.Name)
-					}
-				}
-			}
-		} else {
-			// Clean up orphan CRs whose owner node is down.
+		// Delete orphans according to the conditions
+		canDelete := false
+		if types.GetCondition(orphan.Status.Conditions, longhorn.OrphanConditionTypeUnavailable).Status == longhorn.ConditionStatusTrue {
+			canDelete = true
+		}
+
+		if !onDiskDataExist || canDelete {
 			if err := nc.ds.DeleteOrphan(orphan.Name); err != nil {
 				return errors.Wrapf(err, "failed to delete orphan %v", orphan.Name)
 			}
 		}
 	}
-
 	return nil
 }
 
-func isDiskDownOrEvicted(node *longhorn.Node, orphan *longhorn.Orphan) bool {
-	id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-	disk, ok := node.Spec.Disks[id]
-	if !ok || (ok && disk.EvictionRequested) {
-		return true
-	}
-	return false
-}
-
-func isDiskUUIDChanged(node *longhorn.Node, orphan *longhorn.Orphan) bool {
-	id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-	if status, ok := node.Status.DiskStatus[id]; ok {
-		if orphan.Spec.Parameters[longhorn.OrphanDiskUUID] != status.DiskUUID {
-			return true
-		}
-	}
-	return false
-}
-
-func (nc *NodeController) createOrphans(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) error {
-	// Find out the orphaned directories by checking with replica CRs
-	for diskID := range onDiskReplicaDirectoryNames {
-		for replicaName := range node.Status.DiskStatus[diskID].ScheduledReplica {
-			replica, err := nc.ds.GetReplica(replicaName)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					continue
-				} else {
-					return errors.Wrapf(err, "failed to get replica %v", replicaName)
-				}
-			}
-			delete(onDiskReplicaDirectoryNames[diskID], replica.Spec.DataDirectoryName)
-		}
-	}
-
-	// Now, the replica directories in onDiskReplicaDirectoryNames are orphaned, so we can create orphan resources for them.
-	for diskID, names := range onDiskReplicaDirectoryNames {
+func (nc *NodeController) createOrphans(node *longhorn.Node, orphanedReplicaDirectoryNames map[string]map[string]string) error {
+	for diskID, names := range orphanedReplicaDirectoryNames {
 		for name := range names {
-			if err := nc.createOrphan(node, name, diskID); err != nil && !apierrors.IsAlreadyExists(err) {
+			if err := nc.createOrphan(node, diskID, name); err != nil && !apierrors.IsAlreadyExists(err) {
 				return errors.Wrapf(err, "unable to create orphan for orphaned replica directory %v in disk %v on node %v",
 					name, node.Spec.Disks[diskID].Path, node.Name)
 			}
@@ -1003,26 +949,26 @@ func (nc *NodeController) createOrphans(node *longhorn.Node, onDiskReplicaDirect
 	return nil
 }
 
-func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName, id string) error {
-	orphanName := types.GetOrphanChecksumNameForOrphanedDirectory(replicaDirectoryName, id, node.Name)
+func (nc *NodeController) createOrphan(node *longhorn.Node, diskID, replicaDirectoryName string) error {
+	name := types.GetOrphanChecksumNameForOrphanedDirectory(node.Name, diskID, replicaDirectoryName)
 
-	_, err := nc.ds.GetOrphanRO(orphanName)
+	_, err := nc.ds.GetOrphanRO(name)
 	if err == nil || (err != nil && !apierrors.IsNotFound(err)) {
 		return err
 	}
 
 	orphan := &longhorn.Orphan{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: orphanName,
+			Name: name,
 		},
 		Spec: longhorn.OrphanSpec{
 			NodeID: node.Name,
 			Type:   longhorn.OrphanTypeReplicaDirectory,
 			Parameters: map[string]string{
 				longhorn.OrphanDataName: replicaDirectoryName,
-				longhorn.OrphanDiskFsid: id,
-				longhorn.OrphanDiskUUID: node.Status.DiskStatus[id].DiskUUID,
-				longhorn.OrphanDiskPath: node.Spec.Disks[id].Path,
+				longhorn.OrphanDiskFsid: diskID,
+				longhorn.OrphanDiskUUID: node.Status.DiskStatus[diskID].DiskUUID,
+				longhorn.OrphanDiskPath: node.Spec.Disks[diskID].Path,
 			},
 		},
 	}
@@ -1032,8 +978,8 @@ func (nc *NodeController) createOrphan(node *longhorn.Node, replicaDirectoryName
 	return err
 }
 
-func (nc *NodeController) syncWithMonitor(mon monitor.Monitor, node *longhorn.Node) (*monitor.NodeMonitorState, error) {
-	v, err := mon.GetState()
+func (nc *NodeController) syncWithMonitor(mon monitor.Monitor, node *longhorn.Node) (*monitor.NodeMonitorCollectedData, error) {
+	v, err := mon.GetCollectedData()
 	if err != nil {
 		return nil, err
 	}
@@ -1042,7 +988,7 @@ func (nc *NodeController) syncWithMonitor(mon monitor.Monitor, node *longhorn.No
 		return nil, errors.New("cannot find state in monitor")
 	}
 
-	state := v.(*monitor.NodeMonitorState)
+	state := v.(*monitor.NodeMonitorCollectedData)
 
 	if !isMonitoredNodeDiskStatusIsUpdated(node, state.Node) {
 		return nil, errors.New("node disk status is not updated")

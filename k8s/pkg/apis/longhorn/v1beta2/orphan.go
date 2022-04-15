@@ -5,11 +5,19 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type OrphanType string
 
 const (
-	OrphanTypeReplicaDirectory = OrphanType("replica directory")
+	OrphanTypeReplicaDirectory = OrphanType("replicaDirectory")
 )
 
 const (
-	OrphanConditionTypeDeletable = "Deletable"
+	OrphanConditionTypeError       = "Error"
+	OrphanConditionTypeUnavailable = "Unavailable"
+
+	OrphanConditionTypeUnavailableReasonNodeNotFound        = "NodeNotFound"
+	OrphanConditionTypeUnavailableReasonNodeDown            = "NodeDown"
+	OrphanConditionTypeUnavailableReasonNodeEvicted         = "NodeEvicted"
+	OrphanConditionTypeUnavailableReasonDiskNotFound        = "DiskNotFound"
+	OrphanConditionTypeUnavailableReasonDiskEvicted         = "DiskEvicted"
+	OrphanConditionTypeUnavailableReasonAutoDeletionEnabled = "AutoDeletionEnabled"
 )
 
 const (

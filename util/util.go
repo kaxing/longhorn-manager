@@ -61,8 +61,6 @@ const (
 	MinimalVolumeSize = 10 * 1024 * 1024
 
 	RandomIDLenth = 8
-
-	volumeMetaData = "volume.meta"
 )
 
 var (
@@ -90,18 +88,6 @@ type DiskInfo struct {
 	BlockSize        int64
 	StorageMaximum   int64
 	StorageAvailable int64
-}
-
-type VolumeMeta struct {
-	Size            int64
-	Head            string
-	Dirty           bool
-	Rebuilding      bool
-	Error           string
-	Parent          string
-	SectorSize      int64
-	BackingFilePath string
-	BackingFile     interface{}
 }
 
 func ConvertSize(size interface{}) (int64, error) {
@@ -820,7 +806,7 @@ func Contains(list []string, item string) bool {
 	return false
 }
 
-func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string]string, err error) {
+func GetPossibleReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string]string, err error) {
 	defer func() {
 		err = errors.Wrapf(err, "cannot list replica directories in the disk %v", diskPath)
 	}()
@@ -831,21 +817,14 @@ func GetReplicaDirectoryNames(diskPath string) (replicaDirectoryNames map[string
 
 	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
 	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
-	output, err := Execute([]string{}, "nsenter", mountPath, "ls", directory)
+	command := fmt.Sprintf("find %s -type d -maxdepth 1 -mindepth 1 -regextype posix-extended -regex \".*-[a-zA-Z0-9]{8}$\" -exec basename {} \\;", directory)
+	output, err := Execute([]string{}, "nsenter", mountPath, "sh", "-c", command)
 	if err != nil {
 		return replicaDirectoryNames, err
 	}
 
 	names := strings.Split(output, "\n")
 	for _, name := range names {
-		if len(name) == 0 || !isReplicaDirectoryNameValid(name) {
-			continue
-		}
-
-		if ok, err := isVolumeMetaFileExist(diskPath, name); err != nil || !ok {
-			continue
-		}
-
 		replicaDirectoryNames[name] = ""
 	}
 
@@ -857,14 +836,6 @@ func DeleteReplicaDirectoryName(diskPath, replicaDirectoryName string) (err erro
 		err = errors.Wrapf(err, "cannot delete replica directory %v in disk %v", replicaDirectoryName, diskPath)
 	}()
 
-	if len(diskPath) == 0 {
-		return errors.New(fmt.Sprintf("invalid disk path %v", diskPath))
-	}
-
-	if !isReplicaDirectoryNameValid(replicaDirectoryName) {
-		return errors.New(fmt.Sprintf("invalid replica directory name %v", replicaDirectoryName))
-	}
-
 	path := filepath.Join(diskPath, "replicas", replicaDirectoryName)
 
 	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
@@ -875,35 +846,4 @@ func DeleteReplicaDirectoryName(diskPath, replicaDirectoryName string) (err erro
 	}
 
 	return nil
-}
-
-func isReplicaDirectoryNameValid(name string) bool {
-	if !strings.HasPrefix(name, "pvc-") || len(name) < RandomIDLenth || strings.Count(name, "-") < 2 {
-		return false
-	}
-
-	return ValidateRandomID(name[len(name)-RandomIDLenth:])
-}
-
-func isVolumeMetaFileExist(diskPath, replicaDirectoryName string) (bool, error) {
-	var meta VolumeMeta
-
-	path := filepath.Join(diskPath, "replicas", replicaDirectoryName, volumeMetaData)
-
-	if err := unmarshalFile(path, &meta); err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
-func unmarshalFile(path string, obj interface{}) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	dec := json.NewDecoder(f)
-	return dec.Decode(obj)
 }

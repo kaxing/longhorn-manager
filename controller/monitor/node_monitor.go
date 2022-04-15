@@ -2,7 +2,10 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,13 +24,15 @@ import (
 
 const (
 	NodeMonitorSyncPeriod = 30 * time.Second
+
+	volumeMetaData = "volume.meta"
 )
 
 type NodeMonitor struct {
 	*baseMonitor
 
-	stateLock sync.RWMutex
-	state     *NodeMonitorState
+	collectedDataLock sync.RWMutex
+	collectedData     *NodeMonitorCollectedData
 
 	syncCallback func(key string)
 
@@ -36,9 +41,21 @@ type NodeMonitor struct {
 	generateDiskConfig GenerateDiskConfig
 }
 
-type NodeMonitorState struct {
+type NodeMonitorCollectedData struct {
 	Node                        *longhorn.Node
 	OnDiskReplicaDirectoryNames map[string]map[string]string
+}
+
+type VolumeMeta struct {
+	Size            int64
+	Head            string
+	Dirty           bool
+	Rebuilding      bool
+	Error           string
+	Parent          string
+	SectorSize      int64
+	BackingFilePath string
+	BackingFile     interface{}
 }
 
 type GetDiskInfoHandler func(string) (*util.DiskInfo, error)
@@ -52,8 +69,8 @@ func NewNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRecorde
 	m := &NodeMonitor{
 		baseMonitor: newBaseMonitor(ctx, quit, logger, eventRecorder, ds, NodeMonitorSyncPeriod),
 
-		stateLock: sync.RWMutex{},
-		state: &NodeMonitorState{
+		collectedDataLock: sync.RWMutex{},
+		collectedData: &NodeMonitorCollectedData{
 			Node:                        node.DeepCopy(),
 			OnDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
 		},
@@ -77,7 +94,7 @@ type diskInfo struct {
 
 func (m *NodeMonitor) Start() {
 	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
-		if err := m.SyncState(); err != nil {
+		if err := m.SyncCollectedData(); err != nil {
 			m.logger.Errorf("failed to sync state because of %v", err)
 		}
 		return false, nil
@@ -88,42 +105,42 @@ func (m *NodeMonitor) Close() {
 	m.quit()
 }
 
-func (m *NodeMonitor) GetState() (interface{}, error) {
-	m.stateLock.RLock()
-	defer m.stateLock.RUnlock()
+func (m *NodeMonitor) GetCollectedData() (interface{}, error) {
+	m.collectedDataLock.RLock()
+	defer m.collectedDataLock.RUnlock()
 
-	state := &NodeMonitorState{}
-	if err := copier.Copy(state, m.state); err != nil {
+	data := &NodeMonitorCollectedData{}
+	if err := copier.Copy(data, m.collectedData); err != nil {
 		return nil, errors.Wrapf(err, "failed to copy node monitor state")
 	}
 
-	return state, nil
+	return data, nil
 }
 
-func (m *NodeMonitor) SyncState() error {
-	node, err := m.ds.GetNode(m.state.Node.Name)
+func (m *NodeMonitor) SyncCollectedData() error {
+	node, err := m.ds.GetNode(m.collectedData.Node.Name)
 	if err != nil {
-		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.state.Node.Name)
+		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.collectedData.Node.Name)
 		return err
 	}
 
 	m.syncDiskStatus(node)
 
-	onDiksDiskReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
-	m.updateState(node, onDiksDiskReplicaDirectoryNames)
+	onDiksReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
+	m.updateCollectedData(node, onDiksReplicaDirectoryNames)
 
-	key := m.state.Node.Namespace + "/" + m.state.Node.Name
+	key := m.collectedData.Node.Namespace + "/" + m.collectedData.Node.Name
 	m.syncCallback(key)
 
 	return nil
 }
 
-func (m *NodeMonitor) updateState(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) {
-	m.stateLock.Lock()
-	defer m.stateLock.Unlock()
+func (m *NodeMonitor) updateCollectedData(node *longhorn.Node, onDiskReplicaDirectoryNames map[string]map[string]string) {
+	m.collectedDataLock.Lock()
+	defer m.collectedDataLock.Unlock()
 
-	m.state.Node = node.DeepCopy()
-	m.state.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
+	m.collectedData.Node = node.DeepCopy()
+	m.collectedData.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
 }
 
 func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) {
@@ -271,20 +288,66 @@ func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[st
 	result := make(map[string]map[string]string, 0)
 
 	for id, disk := range node.Spec.Disks {
-		// Don't create orphan CRs for the on-disk data in evicted disks or on evicted nodes.
-		if node.Spec.EvictionRequested || node.Spec.Disks[id].EvictionRequested {
+		possibleNames, err := util.GetPossibleReplicaDirectoryNames(disk.Path)
+		if err != nil {
+			logrus.Errorf("unable to get possible replica directories in disk %v on node %v since %v", disk.Path, node.Name, err.Error())
 			continue
 		}
 
-		replicaDirectoryNames, err := util.GetReplicaDirectoryNames(disk.Path)
+		prunedPossibleNames, err := m.prunePossibleReplicaDirectoryNames(node, disk.Path, possibleNames)
 		if err != nil {
-			logrus.Warnf("Unable to get replica directories in disk %v on node %v since %v", disk.Path, node.Name, err.Error())
+			logrus.Errorf("unable to prune possible replica directories in disk %v on node %v since %v", disk.Path, node.Name, err.Error())
+			continue
 		}
 
-		result[id] = replicaDirectoryNames
+		result[id] = prunedPossibleNames
 	}
 
 	return result
+}
+
+func (m *NodeMonitor) prunePossibleReplicaDirectoryNames(node *longhorn.Node, diskPath string, replicaDirectoryNames map[string]string) (map[string]string, error) {
+	// Find out the orphaned directories by checking with replica CRs
+	replicas, err := m.ds.ListReplicasByNodeRO(node.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, replica := range replicas {
+		delete(replicaDirectoryNames, replica.Spec.DataDirectoryName)
+	}
+
+	// Check volume metafile
+	for name := range replicaDirectoryNames {
+		if ok, err := isVolumeMetaFileExist(diskPath, name); err != nil || !ok {
+			delete(replicaDirectoryNames, name)
+		}
+	}
+
+	return replicaDirectoryNames, nil
+}
+
+func isVolumeMetaFileExist(diskPath, replicaDirectoryName string) (bool, error) {
+	var meta VolumeMeta
+
+	path := filepath.Join(diskPath, "replicas", replicaDirectoryName, volumeMetaData)
+
+	if err := unmarshalFile(path, &meta); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func unmarshalFile(path string, obj interface{}) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	return dec.Decode(obj)
 }
 
 func (m *NodeMonitor) getDiskInfoMap(node *longhorn.Node) map[string]*diskInfo {

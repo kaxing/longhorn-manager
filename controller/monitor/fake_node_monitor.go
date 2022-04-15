@@ -31,7 +31,7 @@ type FakeNodeMonitor struct {
 	*baseMonitor
 
 	stateLock sync.RWMutex
-	state     *NodeMonitorState
+	state     *NodeMonitorCollectedData
 
 	syncCallback func(key string)
 
@@ -48,7 +48,7 @@ func NewFakeNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRec
 		baseMonitor: newBaseMonitor(ctx, quit, logger, eventRecorder, ds, FakeNodeMonitorSyncPeriod),
 
 		stateLock: sync.RWMutex{},
-		state: &NodeMonitorState{
+		state: &NodeMonitorCollectedData{
 			Node:                        node.DeepCopy(),
 			OnDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
 		},
@@ -65,7 +65,7 @@ func NewFakeNodeMonitor(logger logrus.FieldLogger, eventRecorder record.EventRec
 
 func (m *FakeNodeMonitor) Start() {
 	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
-		if err := m.SyncState(); err != nil {
+		if err := m.SyncCollectedData(); err != nil {
 			m.logger.Errorf("Stop monitoring because of %v", err)
 		}
 		return false, nil
@@ -76,11 +76,11 @@ func (m *FakeNodeMonitor) Close() {
 	m.quit()
 }
 
-func (m *FakeNodeMonitor) GetState() (interface{}, error) {
+func (m *FakeNodeMonitor) GetCollectedData() (interface{}, error) {
 	m.stateLock.RLock()
 	defer m.stateLock.RUnlock()
 
-	state := &NodeMonitorState{}
+	state := &NodeMonitorCollectedData{}
 	if err := copier.Copy(state, m.state); err != nil {
 		return nil, errors.Wrapf(err, "failed to copy node monitor state")
 	}
@@ -88,7 +88,7 @@ func (m *FakeNodeMonitor) GetState() (interface{}, error) {
 	return state, nil
 }
 
-func (m *FakeNodeMonitor) SyncState() error {
+func (m *FakeNodeMonitor) SyncCollectedData() error {
 	node, err := m.ds.GetNode(m.state.Node.Name)
 	if err != nil {
 		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.state.Node.Name)
@@ -258,19 +258,6 @@ func (m *FakeNodeMonitor) updateDiskStatusReadyCondition(node *longhorn.Node) {
 
 func (m *FakeNodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) (map[string]map[string]string, error) {
 	result := make(map[string]map[string]string, 0)
-
-	// Add active and orphaned replica directories
-	replicas, err := m.ds.ListReplicasByNodeRO(node.Name)
-	if err != nil {
-		return nil, err
-	}
-	for _, replica := range replicas {
-		if result[replica.Spec.DiskID] == nil {
-			result[replica.Spec.DiskID] = make(map[string]string)
-		}
-
-		result[replica.Spec.DiskID][replica.Spec.DataDirectoryName] = ""
-	}
 
 	// Add orphaned replica directory in each disk
 	for id := range node.Spec.Disks {
