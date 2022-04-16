@@ -81,7 +81,7 @@ func (m *FakeNodeMonitor) GetCollectedData() (interface{}, error) {
 
 	data := &NodeMonitorCollectedData{}
 	if err := copier.Copy(data, m.collectedData); err != nil {
-		return nil, errors.Wrapf(err, "failed to copy node monitor state")
+		return nil, errors.Wrapf(err, "failed to copy node monitor collected data")
 	}
 
 	return data, nil

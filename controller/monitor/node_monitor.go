@@ -64,6 +64,11 @@ type GetDiskInfoHandler func(string) (*util.DiskInfo, error)
 type GetDiskConfig func(string) (*util.DiskConfig, error)
 type GenerateDiskConfig func(string) (*util.DiskConfig, error)
 
+type DiskInfo struct {
+	Entry *util.DiskInfo
+	err   error
+}
+
 func NewNodeMonitor(logger logrus.FieldLogger, ds *datastore.DataStore, node *longhorn.Node, syncCallback func(key string)) (*NodeMonitor, error) {
 	ctx, quit := context.WithCancel(context.Background())
 
@@ -87,28 +92,10 @@ func NewNodeMonitor(logger logrus.FieldLogger, ds *datastore.DataStore, node *lo
 	return m, nil
 }
 
-func copyDiskStatus(diskStatus map[string]*longhorn.DiskStatus) map[string]*longhorn.DiskStatus {
-	diskStatusCopy := make(map[string]*longhorn.DiskStatus, 0)
-
-	for name, status := range diskStatus {
-		copyStatus := &longhorn.DiskStatus{}
-
-		status.DeepCopyInto(copyStatus)
-		diskStatusCopy[name] = copyStatus
-	}
-
-	return diskStatusCopy
-}
-
-type DiskInfo struct {
-	Entry *util.DiskInfo
-	err   error
-}
-
 func (m *NodeMonitor) Start() {
 	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
 		if err := m.SyncCollectedData(); err != nil {
-			m.logger.Errorf("failed to sync state because of %v", err)
+			m.logger.Errorf("failed to sync data because of %v", err)
 		}
 		return false, nil
 	}, m.ctx.Done())
@@ -124,7 +111,7 @@ func (m *NodeMonitor) GetCollectedData() (interface{}, error) {
 
 	data := &NodeMonitorCollectedData{}
 	if err := copier.Copy(data, m.collectedData); err != nil {
-		return nil, errors.Wrapf(err, "failed to copy node monitor state")
+		return nil, errors.Wrapf(err, "failed to copy node monitor collected data")
 	}
 
 	return data, nil
@@ -133,11 +120,12 @@ func (m *NodeMonitor) GetCollectedData() (interface{}, error) {
 func (m *NodeMonitor) SyncCollectedData() error {
 	node, err := m.ds.GetNode(m.nodeName)
 	if err != nil {
-		err = errors.Wrapf(err, "longhorn node %v has been deleted", m.nodeName)
+		err = errors.Wrapf(err, "failed to get longhorn node %v", m.nodeName)
 		return err
 	}
 
 	pruneDiskStatus(node)
+
 	diskStatusMap, diskInfoMap := m.syncDiskStatus(node)
 	onDiksReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
 
@@ -303,29 +291,6 @@ func (m *NodeMonitor) prunePossibleReplicaDirectoryNames(node *longhorn.Node, di
 	return replicaDirectoryNames, nil
 }
 
-func isVolumeMetaFileExist(diskPath, replicaDirectoryName string) (bool, error) {
-	var meta VolumeMeta
-
-	path := filepath.Join(diskPath, "replicas", replicaDirectoryName, volumeMetaData)
-
-	if err := unmarshalFile(path, &meta); err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
-func unmarshalFile(path string, obj interface{}) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	dec := json.NewDecoder(f)
-	return dec.Decode(obj)
-}
-
 func (m *NodeMonitor) getDiskInfoMap(node *longhorn.Node) map[string]*DiskInfo {
 	result := map[string]*DiskInfo{}
 
@@ -356,6 +321,29 @@ func (m *NodeMonitor) isFSIDDuplicatedWithExistingReadyDisk(name string, disks [
 	}
 
 	return false
+}
+
+func isVolumeMetaFileExist(diskPath, replicaDirectoryName string) (bool, error) {
+	var meta VolumeMeta
+
+	path := filepath.Join(diskPath, "replicas", replicaDirectoryName, volumeMetaData)
+
+	if err := unmarshalFile(path, &meta); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func unmarshalFile(path string, obj interface{}) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	return dec.Decode(obj)
 }
 
 func pruneDiskStatus(node *longhorn.Node) {
@@ -405,4 +393,16 @@ func isDiskStatusChanged(oldDiskStatus, newDiskStatus map[string]*longhorn.DiskS
 		}
 	}
 	return false
+}
+
+func copyDiskStatus(diskStatus map[string]*longhorn.DiskStatus) map[string]*longhorn.DiskStatus {
+	diskStatusCopy := make(map[string]*longhorn.DiskStatus, 0)
+
+	for name, status := range diskStatus {
+		statusCopy := &longhorn.DiskStatus{}
+		status.DeepCopyInto(statusCopy)
+		diskStatusCopy[name] = statusCopy
+	}
+
+	return diskStatusCopy
 }
