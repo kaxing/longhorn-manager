@@ -1841,6 +1841,28 @@ func (s *DataStore) GetReadyDiskNode(diskUUID string) (*longhorn.Node, string, e
 	return nil, "", fmt.Errorf("cannot find the corresponding ready node and disk with disk UUID %v", diskUUID)
 }
 
+// GetDisk find disk name by the given nodeName and diskUUD
+// Returns the disk name
+func (s *DataStore) GetReadyDisk(nodeName string, diskUUID string) (string, error) {
+	node, err := s.GetNode(nodeName)
+	if err != nil {
+		return "", err
+	}
+
+	for diskName, diskStatus := range node.Status.DiskStatus {
+		if diskStatus.DiskUUID == diskUUID {
+			condition := types.GetCondition(diskStatus.Conditions, longhorn.DiskConditionTypeReady)
+			if condition.Status == longhorn.ConditionStatusTrue {
+				if _, exists := node.Spec.Disks[diskName]; exists {
+					return diskName, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("cannot find the ready disk with UUID %v", diskUUID)
+}
+
 // UpdateNode updates Longhorn Node resource and verifies update
 func (s *DataStore) UpdateNode(node *longhorn.Node) (*longhorn.Node, error) {
 	obj, err := s.lhClient.LonghornV1beta2().Nodes(s.namespace).Update(context.TODO(), node, metav1.UpdateOptions{})

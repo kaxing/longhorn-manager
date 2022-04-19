@@ -80,7 +80,7 @@ func checkOrphanParameters(orphan *longhorn.Orphan) error {
 func checkOrphanForReplicaDirectory(orphan *longhorn.Orphan) error {
 	params := []string{
 		longhorn.OrphanDataName,
-		longhorn.OrphanDiskFsid,
+		longhorn.OrphanDiskName,
 		longhorn.OrphanDiskUUID,
 		longhorn.OrphanDiskPath,
 	}

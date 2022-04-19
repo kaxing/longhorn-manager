@@ -194,7 +194,7 @@ func kubeObjStatusSyncTest(testType string) *NodeTestCase {
 				Type:   longhorn.OrphanTypeReplica,
 				Parameters: map[string]string{
 					longhorn.OrphanDataName: monitor.TestOrphanedReplicaDirectoryName,
-					longhorn.OrphanDiskFsid: TestDiskID1,
+					longhorn.OrphanDiskUUID: TestDiskID1,
 					longhorn.OrphanDiskPath: TestDefaultDataPath,
 				},
 			},
@@ -290,7 +290,7 @@ func (s *TestSuite) TestSyncNode(c *C) {
 				Type:   longhorn.OrphanTypeReplica,
 				Parameters: map[string]string{
 					longhorn.OrphanDataName: monitor.TestOrphanedReplicaDirectoryName,
-					longhorn.OrphanDiskFsid: TestDiskID1,
+					longhorn.OrphanDiskUUID: TestDiskID1,
 					longhorn.OrphanDiskPath: TestDefaultDataPath,
 				},
 			},
@@ -373,7 +373,7 @@ func (s *TestSuite) TestSyncNode(c *C) {
 				Type:   longhorn.OrphanTypeReplica,
 				Parameters: map[string]string{
 					longhorn.OrphanDataName: monitor.TestOrphanedReplicaDirectoryName,
-					longhorn.OrphanDiskFsid: TestDiskID1,
+					longhorn.OrphanDiskUUID: TestDiskID1,
 					longhorn.OrphanDiskPath: TestDefaultDataPath,
 				},
 			},
@@ -458,7 +458,7 @@ func (s *TestSuite) TestSyncNode(c *C) {
 				Type:   longhorn.OrphanTypeReplica,
 				Parameters: map[string]string{
 					longhorn.OrphanDataName: monitor.TestOrphanedReplicaDirectoryName,
-					longhorn.OrphanDiskFsid: TestDiskID1,
+					longhorn.OrphanDiskUUID: TestDiskID1,
 					longhorn.OrphanDiskPath: TestDefaultDataPath,
 				},
 			},
@@ -519,7 +519,7 @@ func (s *TestSuite) TestSyncNode(c *C) {
 				Type:   longhorn.OrphanTypeReplica,
 				Parameters: map[string]string{
 					longhorn.OrphanDataName: monitor.TestOrphanedReplicaDirectoryName,
-					longhorn.OrphanDiskFsid: TestDiskID1,
+					longhorn.OrphanDiskUUID: TestDiskID1,
 					longhorn.OrphanDiskPath: TestDefaultDataPath,
 				},
 			},
@@ -604,7 +604,7 @@ func (s *TestSuite) TestSyncNode(c *C) {
 				Type:   longhorn.OrphanTypeReplica,
 				Parameters: map[string]string{
 					longhorn.OrphanDataName: monitor.TestOrphanedReplicaDirectoryName,
-					longhorn.OrphanDiskFsid: TestDiskID1,
+					longhorn.OrphanDiskUUID: TestDiskID1,
 					longhorn.OrphanDiskPath: TestDefaultDataPath,
 				},
 			},
@@ -800,7 +800,7 @@ func (s *TestSuite) TestSyncNode(c *C) {
 		}
 
 		for _, orphan := range tc.expectOrphans {
-			orphanName := types.GetOrphanChecksumNameForOrphanedDirectory(orphan.Spec.NodeID, orphan.Spec.Parameters[longhorn.OrphanDiskFsid], orphan.Spec.Parameters[longhorn.OrphanDataName])
+			orphanName := types.GetOrphanChecksumNameForOrphanedDirectory(orphan.Spec.NodeID, orphan.Spec.Parameters[longhorn.OrphanDiskUUID], orphan.Spec.Parameters[longhorn.OrphanDataName])
 			_, err := lhClient.LonghornV1beta2().Orphans(TestNamespace).Get(context.TODO(), orphanName, metav1.GetOptions{})
 			c.Assert(err, IsNil)
 		}

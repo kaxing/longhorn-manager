@@ -957,15 +957,23 @@ func (nc *NodeController) deleteOrphans(node *longhorn.Node, onDiskReplicaDirect
 			continue
 		}
 
-		// If the on-disk is missing, e.g. deleted by users by manual, we need to delete the orphaned CR.
-		// Orphan controller won't stat/check the on-disk data one by one and isn't aware the of the missing replica directory,
+		// If the on-disk data is missing, e.g. deleted by users by manual, we need to delete the orphaned CR.
+		// Orphan controller won't stat/check the on-disk data and isn't aware the of the missing replica directory,
 		// so we check and handle it here.
-		id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-		replicaDirectoryName := orphan.Spec.Parameters[longhorn.OrphanDataName]
-		_, onDiskDataExist := onDiskReplicaDirectoryNames[id][replicaDirectoryName]
+		if orphan.Spec.Type == longhorn.OrphanTypeReplica {
+			onDiskDataExist, err := nc.isOnDiskDataExist(orphan, onDiskReplicaDirectoryNames)
+			if err != nil {
+				return err
+			}
+			if !onDiskDataExist {
+				if err := nc.ds.DeleteOrphan(orphan.Name); err != nil && !apierrors.IsNotFound(err) {
+					return errors.Wrapf(err, "failed to delete orphan %v", orphan.Name)
+				}
+				continue
+			}
+		}
 
 		if autoDeletionEnabled ||
-			!onDiskDataExist ||
 			types.GetCondition(orphan.Status.Conditions, longhorn.OrphanConditionTypeDataCleanable).Status == longhorn.ConditionStatusFalse {
 			if err := nc.ds.DeleteOrphan(orphan.Name); err != nil && !apierrors.IsNotFound(err) {
 				return errors.Wrapf(err, "failed to delete orphan %v", orphan.Name)
@@ -975,12 +983,28 @@ func (nc *NodeController) deleteOrphans(node *longhorn.Node, onDiskReplicaDirect
 	return nil
 }
 
+func (nc *NodeController) isOnDiskDataExist(orphan *longhorn.Orphan, onDiskReplicaDirectoryNames map[string]map[string]string) (bool, error) {
+	/*
+		diskName, err := nc.ds.GetDisk(orphan.Spec.NodeID, orphan.Spec.Parameters[longhorn.OrphanDiskUUID])
+		if err != nil {
+			if strings.Contains(err.Error(), "cannot find the ready disk with UUID") {
+				return false, nil
+			}
+			return false, err
+		}
+	*/
+	replicaDirectoryName := orphan.Spec.Parameters[longhorn.OrphanDataName]
+	_, exist := onDiskReplicaDirectoryNames[orphan.Spec.Parameters[longhorn.OrphanDiskName]][replicaDirectoryName]
+
+	return exist, nil
+}
+
 func (nc *NodeController) createOrphans(node *longhorn.Node, orphanedReplicaDirectoryNames map[string]map[string]string) error {
-	for diskID, names := range orphanedReplicaDirectoryNames {
+	for diskName, names := range orphanedReplicaDirectoryNames {
 		for name := range names {
-			if err := nc.createOrphan(node, diskID, name); err != nil && !apierrors.IsAlreadyExists(err) {
+			if err := nc.createOrphan(node, diskName, name); err != nil && !apierrors.IsAlreadyExists(err) {
 				return errors.Wrapf(err, "unable to create orphan for orphaned replica directory %v in disk %v on node %v",
-					name, node.Spec.Disks[diskID].Path, node.Name)
+					name, node.Spec.Disks[diskName].Path, node.Name)
 			}
 		}
 	}
@@ -988,8 +1012,8 @@ func (nc *NodeController) createOrphans(node *longhorn.Node, orphanedReplicaDire
 	return nil
 }
 
-func (nc *NodeController) createOrphan(node *longhorn.Node, diskID, replicaDirectoryName string) error {
-	name := types.GetOrphanChecksumNameForOrphanedDirectory(node.Name, diskID, replicaDirectoryName)
+func (nc *NodeController) createOrphan(node *longhorn.Node, diskName, replicaDirectoryName string) error {
+	name := types.GetOrphanChecksumNameForOrphanedDirectory(node.Name, diskName, replicaDirectoryName)
 
 	_, err := nc.ds.GetOrphanRO(name)
 	if err == nil || (err != nil && !apierrors.IsNotFound(err)) {
@@ -1005,9 +1029,9 @@ func (nc *NodeController) createOrphan(node *longhorn.Node, diskID, replicaDirec
 			Type:   longhorn.OrphanTypeReplica,
 			Parameters: map[string]string{
 				longhorn.OrphanDataName: replicaDirectoryName,
-				longhorn.OrphanDiskFsid: diskID,
-				longhorn.OrphanDiskUUID: node.Status.DiskStatus[diskID].DiskUUID,
-				longhorn.OrphanDiskPath: node.Spec.Disks[diskID].Path,
+				longhorn.OrphanDiskName: diskName,
+				longhorn.OrphanDiskUUID: node.Status.DiskStatus[diskName].DiskUUID,
+				longhorn.OrphanDiskPath: node.Spec.Disks[diskName].Path,
 			},
 		},
 	}

@@ -238,7 +238,17 @@ func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) (diskStatusMap map[str
 func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[string]map[string]string {
 	result := make(map[string]map[string]string, 0)
 
-	for id, disk := range node.Spec.Disks {
+	for diskName, disk := range node.Spec.Disks {
+		/*
+			if node.Status.DiskStatus == nil || node.Status.DiskStatus[diskName] == nil {
+				continue
+			}
+
+			readyCondition := types.GetCondition(node.Status.DiskStatus[diskName].Conditions, longhorn.DiskConditionTypeReady)
+			if readyCondition.Status != longhorn.ConditionStatusTrue {
+				continue
+			}
+		*/
 		possibleNames, err := util.GetPossibleReplicaDirectoryNames(disk.Path)
 		if err != nil {
 			logrus.Errorf("unable to get possible replica directories in disk %v on node %v since %v", disk.Path, node.Name, err.Error())
@@ -251,7 +261,7 @@ func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[st
 			continue
 		}
 
-		result[id] = prunedPossibleNames
+		result[diskName] = prunedPossibleNames
 	}
 
 	return result

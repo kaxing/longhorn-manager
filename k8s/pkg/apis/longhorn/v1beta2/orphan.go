@@ -12,17 +12,16 @@ const (
 	OrphanConditionTypeError         = "Error"
 	OrphanConditionTypeDataCleanable = "DataCleanable"
 
-	OrphanConditionTypeDataCleanableReasonNodeUnavailable     = "NodeUnavailable"
-	OrphanConditionTypeDataCleanableReasonNodeEvicted         = "NodeEvicted"
-	OrphanConditionTypeDataCleanableReasonDiskNotFound        = "DiskNotFound"
-	OrphanConditionTypeDataCleanableReasonDiskEvicted         = "DiskEvicted"
-	OrphanConditionTypeDataCleanableReasonDiskUUIDChanged     = "DiskUUIDChanged"
-	OrphanConditionTypeDataCleanableReasonAutoDeletionEnabled = "AutoDeletionEnabled"
+	OrphanConditionTypeDataCleanableReasonNodeUnavailable = "NodeUnavailable"
+	OrphanConditionTypeDataCleanableReasonNodeEvicted     = "NodeEvicted"
+	OrphanConditionTypeDataCleanableReasonDiskInvalid     = "DiskInvalid"
+	OrphanConditionTypeDataCleanableReasonDiskEvicted     = "DiskEvicted"
+	OrphanConditionTypeDataCleanableReasonDiskChanged     = "DiskChanged"
 )
 
 const (
 	OrphanDataName = "DataName"
-	OrphanDiskFsid = "DiskFsid"
+	OrphanDiskName = "DiskName"
 	OrphanDiskUUID = "DiskUUID"
 	OrphanDiskPath = "DiskPath"
 )

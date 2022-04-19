@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -362,25 +363,29 @@ func (oc *OrphanController) updateUnavailableCondition(orphan *longhorn.Orphan) 
 
 	switch {
 	case orphan.Spec.Type == longhorn.OrphanTypeReplica:
-		reason = checkOrphanedReplicaUnavailable(node, orphan)
+		reason = oc.checkOrphanedReplicaDataCleanable(node, orphan)
 	}
 
 	return nil
 }
 
-func checkOrphanedReplicaUnavailable(node *longhorn.Node, orphan *longhorn.Orphan) string {
-	id := orphan.Spec.Parameters[longhorn.OrphanDiskFsid]
-	if disk, ok := node.Spec.Disks[id]; ok {
-		if disk.EvictionRequested {
-			return longhorn.OrphanConditionTypeDataCleanableReasonDiskEvicted
+func (oc *OrphanController) checkOrphanedReplicaDataCleanable(node *longhorn.Node, orphan *longhorn.Orphan) string {
+	diskName, err := oc.ds.GetReadyDisk(node.Name, orphan.Spec.Parameters[longhorn.OrphanDiskUUID])
+	if err != nil {
+		if strings.Contains(err.Error(), "cannot find the ready disk") {
+			return longhorn.OrphanConditionTypeDataCleanableReasonDiskInvalid
 		}
-		if status, ok := node.Status.DiskStatus[id]; ok {
-			if orphan.Spec.Parameters[longhorn.OrphanDiskUUID] != status.DiskUUID {
-				return longhorn.OrphanConditionTypeDataCleanableReasonDiskUUIDChanged
-			}
-		}
-	} else {
-		return longhorn.OrphanConditionTypeDataCleanableReasonDiskNotFound
+
+		return ""
+	}
+
+	if diskName != orphan.Spec.Parameters[longhorn.OrphanDiskName] {
+		return longhorn.OrphanConditionTypeDataCleanableReasonDiskChanged
+	}
+
+	disk := node.Spec.Disks[diskName]
+	if disk.EvictionRequested {
+		return longhorn.OrphanConditionTypeDataCleanableReasonDiskEvicted
 	}
 
 	return ""
