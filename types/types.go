@@ -555,7 +555,7 @@ func CreateDisksFromAnnotation(annotation string) (map[string]longhorn.DiskSpec,
 		if disk.Path == "" {
 			return nil, fmt.Errorf("invalid disk %+v", disk)
 		}
-		diskInfo, err := util.GetDiskInfo(disk.Path)
+		diskStat, err := util.GetDiskStat(disk.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -567,20 +567,20 @@ func CreateDisksFromAnnotation(annotation string) (map[string]longhorn.DiskSpec,
 
 		// Set to default disk name
 		if disk.Name == "" {
-			disk.Name = DefaultDiskPrefix + diskInfo.Fsid
+			disk.Name = DefaultDiskPrefix + diskStat.Fsid
 		}
 
-		if _, exist := existFsid[diskInfo.Fsid]; exist {
+		if _, exist := existFsid[diskStat.Fsid]; exist {
 			return nil, fmt.Errorf(
 				"the disk %v is the same"+
 					"file system with %v, fsid %v",
-				disk.Path, existFsid[diskInfo.Fsid],
-				diskInfo.Fsid)
+				disk.Path, existFsid[diskStat.Fsid],
+				diskStat.Fsid)
 		}
 
-		existFsid[diskInfo.Fsid] = disk.Path
+		existFsid[diskStat.Fsid] = disk.Path
 
-		if disk.StorageReserved < 0 || disk.StorageReserved > diskInfo.StorageMaximum {
+		if disk.StorageReserved < 0 || disk.StorageReserved > diskStat.StorageMaximum {
 			return nil, fmt.Errorf("the storageReserved setting of disk %v is not valid, should be positive and no more than storageMaximum and storageAvailable", disk.Path)
 		}
 		tags, err := util.ValidateTags(disk.Tags)
@@ -640,16 +640,16 @@ func CreateDefaultDisk(dataPath string) (map[string]longhorn.DiskSpec, error) {
 	if err := util.CreateDiskPathReplicaSubdirectory(dataPath); err != nil {
 		return nil, err
 	}
-	diskInfo, err := util.GetDiskInfo(dataPath)
+	diskStat, err := util.GetDiskStat(dataPath)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]longhorn.DiskSpec{
-		DefaultDiskPrefix + diskInfo.Fsid: {
-			Path:              diskInfo.Path,
+		DefaultDiskPrefix + diskStat.Fsid: {
+			Path:              diskStat.Path,
 			AllowScheduling:   true,
 			EvictionRequested: false,
-			StorageReserved:   diskInfo.StorageMaximum * 30 / 100,
+			StorageReserved:   diskStat.StorageMaximum * 30 / 100,
 			Tags:              []string{},
 		},
 	}, nil

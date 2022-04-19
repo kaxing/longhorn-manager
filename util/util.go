@@ -79,7 +79,7 @@ type MetadataConfig struct {
 	DriverContainerName string
 }
 
-type DiskInfo struct {
+type DiskStat struct {
 	Fsid             string
 	Path             string
 	Type             string
@@ -430,9 +430,9 @@ func CheckBackupType(backupTarget string) (string, error) {
 	return u.Scheme, nil
 }
 
-func GetDiskInfo(directory string) (info *DiskInfo, err error) {
+func GetDiskStat(directory string) (stat *DiskStat, err error) {
 	defer func() {
-		err = errors.Wrapf(err, "cannot get disk info of directory %v", directory)
+		err = errors.Wrapf(err, "cannot get disk stat of directory %v", directory)
 	}()
 	initiatorNSPath := iscsi_util.GetHostNamespacePath(HostProcPath)
 	mountPath := fmt.Sprintf("--mount=%s/mnt", initiatorNSPath)
@@ -442,16 +442,16 @@ func GetDiskInfo(directory string) (info *DiskInfo, err error) {
 	}
 	output = strings.Replace(output, "\n", "", -1)
 
-	diskInfo := &DiskInfo{}
-	err = json.Unmarshal([]byte(output), diskInfo)
+	diskStat := &DiskStat{}
+	err = json.Unmarshal([]byte(output), diskStat)
 	if err != nil {
 		return nil, err
 	}
 
-	diskInfo.StorageMaximum = diskInfo.TotalBlock * diskInfo.BlockSize
-	diskInfo.StorageAvailable = diskInfo.FreeBlock * diskInfo.BlockSize
+	diskStat.StorageMaximum = diskStat.TotalBlock * diskStat.BlockSize
+	diskStat.StorageAvailable = diskStat.FreeBlock * diskStat.BlockSize
 
-	return diskInfo, nil
+	return diskStat, nil
 }
 
 func RetryOnConflictCause(fn func() (interface{}, error)) (interface{}, error) {

@@ -549,7 +549,7 @@ func (nc *NodeController) enqueueKubernetesNode(obj interface{}) {
 }
 
 func (nc *NodeController) syncDiskStatus(node *longhorn.Node, collectedData *monitor.NodeMonitorCollectedData) error {
-	diskInfoMap := collectedData.DiskInfoMap
+	diskStatMap := collectedData.DiskStatMap
 	diskStatusMap := collectedData.DiskStatusMap
 
 	pruneDiskStatus(node)
@@ -568,9 +568,9 @@ func (nc *NodeController) syncDiskStatus(node *longhorn.Node, collectedData *mon
 			// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
 			const truncateTo = 100 * 1024 * 1024
 
-			usableStorage := (diskInfoMap[id].Entry.StorageAvailable / truncateTo) * truncateTo
+			usableStorage := (diskStatMap[id].Entry.StorageAvailable / truncateTo) * truncateTo
 			node.Status.DiskStatus[id].StorageAvailable = usableStorage
-			node.Status.DiskStatus[id].StorageMaximum = diskInfoMap[id].Entry.StorageMaximum
+			node.Status.DiskStatus[id].StorageMaximum = diskStatMap[id].Entry.StorageMaximum
 		}
 
 		eventType := v1.EventTypeNormal

@@ -36,7 +36,7 @@ type FakeNodeMonitor struct {
 
 	syncCallback func(key string)
 
-	getDiskInfoHandler GetDiskInfoHandler
+	getDiskStatHandler GetDiskStatHandler
 	getDiskConfig      GetDiskConfig
 	generateDiskConfig GenerateDiskConfig
 }
@@ -54,7 +54,7 @@ func NewFakeNodeMonitor(logger logrus.FieldLogger, ds *datastore.DataStore, node
 
 		syncCallback: syncCallback,
 
-		getDiskInfoHandler: fakeGetDiskInfo,
+		getDiskStatHandler: fakeGetDiskStat,
 		getDiskConfig:      fakeGetDiskConfig,
 		generateDiskConfig: fakeGenerateDiskConfig,
 	}
@@ -95,32 +95,32 @@ func (m *FakeNodeMonitor) SyncCollectedData() error {
 	}
 
 	pruneDiskStatus(node)
-	diskStatusMap, diskInfoMap := m.syncDiskStatus(node)
+	diskStatusMap, diskStatMap := m.syncDiskStatus(node)
 	onDiksReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
 
 	if isDiskStatusChanged(m.collectedData.DiskStatusMap, diskStatusMap) ||
 		!reflect.DeepEqual(m.collectedData.OnDiskReplicaDirectoryNames, onDiksReplicaDirectoryNames) {
-		m.updateCollectedData(diskStatusMap, diskInfoMap, onDiksReplicaDirectoryNames)
+		m.updateCollectedData(diskStatusMap, diskStatMap, onDiksReplicaDirectoryNames)
 	}
 
 	return nil
 }
 
-func (m *FakeNodeMonitor) updateCollectedData(diskStatusMap map[string]*longhorn.DiskStatus, diskInfoMap map[string]*DiskInfo, onDiskReplicaDirectoryNames map[string]map[string]string) {
+func (m *FakeNodeMonitor) updateCollectedData(diskStatusMap map[string]*longhorn.DiskStatus, diskStatMap map[string]*DiskStat, onDiskReplicaDirectoryNames map[string]map[string]string) {
 	m.collectedDataLock.Lock()
 	defer m.collectedDataLock.Unlock()
 
 	m.collectedData.DiskStatusMap = diskStatusMap
-	m.collectedData.DiskInfoMap = diskInfoMap
+	m.collectedData.DiskStatMap = diskStatMap
 	m.collectedData.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
 }
 
-func (m *FakeNodeMonitor) syncDiskStatus(node *longhorn.Node) (diskStatusMap map[string]*longhorn.DiskStatus, diskInfoMap map[string]*DiskInfo) {
+func (m *FakeNodeMonitor) syncDiskStatus(node *longhorn.Node) (diskStatusMap map[string]*longhorn.DiskStatus, diskStatMap map[string]*DiskStat) {
 	diskStatusMap = copyDiskStatus(node.Status.DiskStatus)
-	diskInfoMap = m.getDiskInfoMap(node)
+	diskStatMap = m.getDiskStatMap(node)
 
 	fsid2Disks := map[string][]string{}
-	for id, info := range diskInfoMap {
+	for id, info := range diskStatMap {
 		if info.err != nil {
 			diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
 				longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
@@ -212,7 +212,7 @@ func (m *FakeNodeMonitor) syncDiskStatus(node *longhorn.Node) (diskStatusMap map
 		}
 	}
 
-	return diskStatusMap, diskInfoMap
+	return diskStatusMap, diskStatMap
 }
 
 func (m *FakeNodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[string]map[string]string {
@@ -229,12 +229,12 @@ func (m *FakeNodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) ma
 	return result
 }
 
-func (m *FakeNodeMonitor) getDiskInfoMap(node *longhorn.Node) map[string]*DiskInfo {
-	result := map[string]*DiskInfo{}
+func (m *FakeNodeMonitor) getDiskStatMap(node *longhorn.Node) map[string]*DiskStat {
+	result := map[string]*DiskStat{}
 
 	for id, disk := range node.Spec.Disks {
-		info, err := m.getDiskInfoHandler(disk.Path)
-		result[id] = &DiskInfo{
+		info, err := m.getDiskStatHandler(disk.Path)
+		result[id] = &DiskStat{
 			Entry: info,
 			err:   err,
 		}
@@ -260,8 +260,8 @@ func (m *FakeNodeMonitor) isFSIDDuplicatedWithExistingReadyDisk(name string, dis
 	return false
 }
 
-func fakeGetDiskInfo(directory string) (*util.DiskInfo, error) {
-	return &util.DiskInfo{
+func fakeGetDiskStat(directory string) (*util.DiskStat, error) {
+	return &util.DiskStat{
 		Fsid:       "fsid",
 		Path:       directory,
 		Type:       "ext4",

@@ -36,23 +36,23 @@ type NodeMonitor struct {
 
 	syncCallback func(key string)
 
-	getDiskInfoHandler GetDiskInfoHandler
+	getDiskStatHandler GetDiskStatHandler
 	getDiskConfig      GetDiskConfig
 	generateDiskConfig GenerateDiskConfig
 }
 
 type NodeMonitorCollectedData struct {
 	DiskStatusMap               map[string]*longhorn.DiskStatus
-	DiskInfoMap                 map[string]*DiskInfo
+	DiskStatMap                 map[string]*DiskStat
 	OnDiskReplicaDirectoryNames map[string]map[string]string
 }
 
-type GetDiskInfoHandler func(string) (*util.DiskInfo, error)
+type GetDiskStatHandler func(string) (*util.DiskStat, error)
 type GetDiskConfig func(string) (*util.DiskConfig, error)
 type GenerateDiskConfig func(string) (*util.DiskConfig, error)
 
-type DiskInfo struct {
-	Entry *util.DiskInfo
+type DiskStat struct {
+	Entry *util.DiskStat
 	err   error
 }
 
@@ -69,7 +69,7 @@ func NewNodeMonitor(logger logrus.FieldLogger, ds *datastore.DataStore, node *lo
 
 		syncCallback: syncCallback,
 
-		getDiskInfoHandler: util.GetDiskInfo,
+		getDiskStatHandler: util.GetDiskStat,
 		getDiskConfig:      util.GetDiskConfig,
 		generateDiskConfig: util.GenerateDiskConfig,
 	}
@@ -113,12 +113,12 @@ func (m *NodeMonitor) SyncCollectedData() error {
 
 	pruneDiskStatus(node)
 
-	diskStatusMap, diskInfoMap := m.syncDiskStatus(node)
+	diskStatusMap, diskStatMap := m.syncDiskStatus(node)
 	onDiksReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
 
 	if isDiskStatusChanged(m.collectedData.DiskStatusMap, diskStatusMap) ||
 		!reflect.DeepEqual(m.collectedData.OnDiskReplicaDirectoryNames, onDiksReplicaDirectoryNames) {
-		m.updateCollectedData(diskStatusMap, diskInfoMap, onDiksReplicaDirectoryNames)
+		m.updateCollectedData(diskStatusMap, diskStatMap, onDiksReplicaDirectoryNames)
 		key := node.Namespace + "/" + m.nodeName
 		m.syncCallback(key)
 	}
@@ -126,21 +126,21 @@ func (m *NodeMonitor) SyncCollectedData() error {
 	return nil
 }
 
-func (m *NodeMonitor) updateCollectedData(diskStatusMap map[string]*longhorn.DiskStatus, diskInfoMap map[string]*DiskInfo, onDiskReplicaDirectoryNames map[string]map[string]string) {
+func (m *NodeMonitor) updateCollectedData(diskStatusMap map[string]*longhorn.DiskStatus, diskStatMap map[string]*DiskStat, onDiskReplicaDirectoryNames map[string]map[string]string) {
 	m.collectedDataLock.Lock()
 	defer m.collectedDataLock.Unlock()
 
 	m.collectedData.DiskStatusMap = diskStatusMap
-	m.collectedData.DiskInfoMap = diskInfoMap
+	m.collectedData.DiskStatMap = diskStatMap
 	m.collectedData.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
 }
 
-func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) (diskStatusMap map[string]*longhorn.DiskStatus, diskInfoMap map[string]*DiskInfo) {
+func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) (diskStatusMap map[string]*longhorn.DiskStatus, diskStatMap map[string]*DiskStat) {
 	diskStatusMap = copyDiskStatus(node.Status.DiskStatus)
-	diskInfoMap = m.getDiskInfoMap(node)
+	diskStatMap = m.getDiskStatMap(node)
 
 	fsid2Disks := map[string][]string{}
-	for id, info := range diskInfoMap {
+	for id, info := range diskStatMap {
 		if info.err != nil {
 			diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
 				longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
@@ -232,7 +232,7 @@ func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) (diskStatusMap map[str
 		}
 	}
 
-	return diskStatusMap, diskInfoMap
+	return diskStatusMap, diskStatMap
 }
 
 func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[string]map[string]string {
@@ -288,12 +288,12 @@ func (m *NodeMonitor) prunePossibleReplicaDirectoryNames(node *longhorn.Node, di
 	return replicaDirectoryNames, nil
 }
 
-func (m *NodeMonitor) getDiskInfoMap(node *longhorn.Node) map[string]*DiskInfo {
-	result := map[string]*DiskInfo{}
+func (m *NodeMonitor) getDiskStatMap(node *longhorn.Node) map[string]*DiskStat {
+	result := map[string]*DiskStat{}
 
 	for id, disk := range node.Spec.Disks {
-		info, err := m.getDiskInfoHandler(disk.Path)
-		result[id] = &DiskInfo{
+		info, err := m.getDiskStatHandler(disk.Path)
+		result[id] = &DiskStat{
 			Entry: info,
 			err:   err,
 		}
