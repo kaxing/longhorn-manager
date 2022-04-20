@@ -42,19 +42,22 @@ type NodeMonitor struct {
 }
 
 type NodeMonitorCollectedData struct {
-	DiskStatusMap               map[string]*longhorn.DiskStatus
-	DiskStatMap                 map[string]*DiskStat
+	HealthyDiskInfo             map[string]map[string]*DiskInfo
+	FailedDiskInfo              map[string]*DiskInfo
 	OnDiskReplicaDirectoryNames map[string]map[string]string
+}
+
+type DiskInfo struct {
+	Path                        string
+	DiskStat                    *util.DiskStat
+	DiskUUID                    string
+	Condition                   *longhorn.Condition
+	OnDiskReplicaDirectoryNames map[string]string
 }
 
 type GetDiskStatHandler func(string) (*util.DiskStat, error)
 type GetDiskConfig func(string) (*util.DiskConfig, error)
 type GenerateDiskConfig func(string) (*util.DiskConfig, error)
-
-type DiskStat struct {
-	Entry *util.DiskStat
-	err   error
-}
 
 func NewNodeMonitor(logger logrus.FieldLogger, ds *datastore.DataStore, node *longhorn.Node, syncCallback func(key string)) (*NodeMonitor, error) {
 	ctx, quit := context.WithCancel(context.Background())
@@ -65,7 +68,11 @@ func NewNodeMonitor(logger logrus.FieldLogger, ds *datastore.DataStore, node *lo
 		nodeName: node.Name,
 
 		collectedDataLock: sync.RWMutex{},
-		collectedData:     &NodeMonitorCollectedData{},
+		collectedData: &NodeMonitorCollectedData{
+			HealthyDiskInfo:             make(map[string]map[string]*DiskInfo, 0),
+			FailedDiskInfo:              make(map[string]*DiskInfo, 0),
+			OnDiskReplicaDirectoryNames: make(map[string]map[string]string, 0),
+		},
 
 		syncCallback: syncCallback,
 
@@ -82,7 +89,7 @@ func NewNodeMonitor(logger logrus.FieldLogger, ds *datastore.DataStore, node *lo
 func (m *NodeMonitor) Start() {
 	wait.PollImmediateUntil(m.syncPeriod, func() (done bool, err error) {
 		if err := m.SyncCollectedData(); err != nil {
-			m.logger.Errorf("failed to sync data because of %v", err)
+			m.logger.Errorf("Stop monitoring because of %v", err)
 		}
 		return false, nil
 	}, m.ctx.Done())
@@ -111,14 +118,13 @@ func (m *NodeMonitor) SyncCollectedData() error {
 		return err
 	}
 
-	pruneDiskStatus(node)
+	healthyDiskInfo, failedDiskInfo := m.collectDiskData(node)
+	onDiskReplicaDirectoryNames := m.collectOnDiskReplicaDirectoryNames(node)
 
-	diskStatusMap, diskStatMap := m.syncDiskStatus(node)
-	onDiksReplicaDirectoryNames := m.getOnDiskReplicaDirectoryNames(node)
-
-	if isDiskStatusChanged(m.collectedData.DiskStatusMap, diskStatusMap) ||
-		!reflect.DeepEqual(m.collectedData.OnDiskReplicaDirectoryNames, onDiksReplicaDirectoryNames) {
-		m.updateCollectedData(diskStatusMap, diskStatMap, onDiksReplicaDirectoryNames)
+	if !reflect.DeepEqual(m.collectedData.HealthyDiskInfo, healthyDiskInfo) ||
+		!reflect.DeepEqual(m.collectedData.FailedDiskInfo, failedDiskInfo) ||
+		!reflect.DeepEqual(m.collectedData.OnDiskReplicaDirectoryNames, onDiskReplicaDirectoryNames) {
+		m.updateCollectedData(healthyDiskInfo, failedDiskInfo, onDiskReplicaDirectoryNames)
 		key := node.Namespace + "/" + m.nodeName
 		m.syncCallback(key)
 	}
@@ -126,116 +132,56 @@ func (m *NodeMonitor) SyncCollectedData() error {
 	return nil
 }
 
-func (m *NodeMonitor) updateCollectedData(diskStatusMap map[string]*longhorn.DiskStatus, diskStatMap map[string]*DiskStat, onDiskReplicaDirectoryNames map[string]map[string]string) {
-	m.collectedDataLock.Lock()
-	defer m.collectedDataLock.Unlock()
+// Collect Disk data. The disks are divided into two groups, the healthy and failed disks.
+// A failed disk means it encounters stat, getDiskConfig or generateDiskConfig failure.
+// healthyDiskInfo layout is map[fsid][diskName]*DiskInfo.
+// failedDiskInfo layout is map[diskName]*DiskInfo.
+func (m *NodeMonitor) collectDiskData(node *longhorn.Node) (map[string]map[string]*DiskInfo, map[string]*DiskInfo) {
+	healthyDiskInfo := make(map[string]map[string]*DiskInfo, 0)
+	failedDiskInfo := make(map[string]*DiskInfo, 0)
 
-	m.collectedData.DiskStatusMap = diskStatusMap
-	m.collectedData.DiskStatMap = diskStatMap
-	m.collectedData.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
-}
-
-func (m *NodeMonitor) syncDiskStatus(node *longhorn.Node) (diskStatusMap map[string]*longhorn.DiskStatus, diskStatMap map[string]*DiskStat) {
-	diskStatusMap = copyDiskStatus(node.Status.DiskStatus)
-	diskStatMap = m.getDiskStatMap(node)
-
-	fsid2Disks := map[string][]string{}
-	for id, info := range diskStatMap {
-		if info.err != nil {
-			diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
-				longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
-				string(longhorn.DiskConditionReasonNoDiskInfo),
-				fmt.Sprintf("Disk %v(%v) on node %v is not ready: Get disk information error: %v",
-					id, node.Spec.Disks[id].Path, node.Name, info.err))
-		} else {
-			if fsid2Disks[info.Entry.Fsid] == nil {
-				fsid2Disks[info.Entry.Fsid] = []string{}
-			}
-			fsid2Disks[info.Entry.Fsid] = append(fsid2Disks[info.Entry.Fsid], id)
+	for diskName, disk := range node.Spec.Disks {
+		stat, err := m.getDiskStatHandler(disk.Path)
+		if err != nil {
+			failedDiskInfo[diskName] =
+				newDiskInfoForFailedDisk(fmt.Sprintf("Disk %v(%v) on node %v is not ready: Get disk information error: %v",
+					diskName, node.Spec.Disks[diskName].Path, node.Name, err))
+			continue
 		}
-	}
 
-	for fsid, disks := range fsid2Disks {
-		for _, id := range disks {
-			diskStatus := diskStatusMap[id]
-			disk := node.Spec.Disks[id]
-			diskUUID := ""
-			diskConfig, err := m.getDiskConfig(node.Spec.Disks[id].Path)
-			if err != nil {
-				if !types.ErrorIsNotFound(err) {
-					diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
-						longhorn.DiskConditionTypeReady,
-						longhorn.ConditionStatusFalse,
-						string(longhorn.DiskConditionReasonNoDiskInfo),
-						fmt.Sprintf("Disk %v(%v) on node %v is not ready: failed to get disk config: error: %v",
-							id, disk.Path, node.Name, err))
+		if healthyDiskInfo[stat.Fsid] == nil {
+			healthyDiskInfo[stat.Fsid] = make(map[string]*DiskInfo, 0)
+		}
+
+		diskConfig, err := m.getDiskConfig(disk.Path)
+		if err != nil {
+			if types.ErrorIsNotFound(err) {
+				diskConfig, err = m.generateDiskConfig(node.Spec.Disks[diskName].Path)
+				if err != nil {
+					failedDiskInfo[diskName] =
+						newDiskInfoForFailedDisk(fmt.Sprintf("Disk %v(%v) on node %v is not ready: failed to generate disk config: error: %v",
+							diskName, disk.Path, node.Name, err))
 					continue
 				}
 			} else {
-				diskUUID = diskConfig.DiskUUID
+				failedDiskInfo[diskName] =
+					newDiskInfoForFailedDisk(fmt.Sprintf("Disk %v(%v) on node %v is not ready: failed to get disk config: error: %v",
+						diskName, disk.Path, node.Name, err))
+				continue
 			}
+		}
 
-			if diskStatusMap[id].DiskUUID == "" {
-				// Check disks in the same filesystem
-				if m.isFSIDDuplicatedWithExistingReadyDisk(
-					id, disks, diskStatusMap) {
-					// Found multiple disks in the same Fsid
-					diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
-						longhorn.DiskConditionTypeReady,
-						longhorn.ConditionStatusFalse,
-						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
-						fmt.Sprintf("Disk %v(%v) on node %v is not ready: disk has same file system ID %v as other disks %+v",
-							id, disk.Path, node.Name, fsid, disks))
-					continue
-				}
-
-				if diskUUID == "" {
-					diskConfig, err := m.generateDiskConfig(node.Spec.Disks[id].Path)
-					if err != nil {
-						diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
-							longhorn.DiskConditionTypeReady,
-							longhorn.ConditionStatusFalse,
-							string(longhorn.DiskConditionReasonNoDiskInfo),
-							fmt.Sprintf("Disk %v(%v) on node %v is not ready: failed to generate disk config: error: %v",
-								id, disk.Path, node.Name, err))
-						continue
-					}
-					diskUUID = diskConfig.DiskUUID
-				}
-				diskStatus.DiskUUID = diskUUID
-			} else { // diskStatusMap[id].DiskUUID != ""
-				if diskUUID == "" {
-					diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
-						longhorn.DiskConditionTypeReady,
-						longhorn.ConditionStatusFalse,
-						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
-						fmt.Sprintf("Disk %v(%v) on node %v is not ready: cannot find disk config file, maybe due to a mount error",
-							id, disk.Path, node.Name))
-				} else if diskStatusMap[id].DiskUUID != diskUUID {
-					diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
-						longhorn.DiskConditionTypeReady,
-						longhorn.ConditionStatusFalse,
-						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
-						fmt.Sprintf("Disk %v(%v) on node %v is not ready: record diskUUID doesn't match the one on the disk ",
-							id, disk.Path, node.Name))
-				}
-			}
-
-			if diskStatus.DiskUUID == diskUUID {
-				diskStatusMap[id].Conditions = types.SetCondition(diskStatusMap[id].Conditions,
-					longhorn.DiskConditionTypeReady,
-					longhorn.ConditionStatusTrue,
-					"",
-					fmt.Sprintf("Disk %v(%v) on node %v is ready", id, disk.Path, node.Name))
-			}
-			diskStatusMap[id] = diskStatus
+		healthyDiskInfo[stat.Fsid][diskName] = &DiskInfo{
+			Path:     disk.Path,
+			DiskStat: stat,
+			DiskUUID: diskConfig.DiskUUID,
 		}
 	}
 
-	return diskStatusMap, diskStatMap
+	return healthyDiskInfo, failedDiskInfo
 }
 
-func (m *NodeMonitor) getOnDiskReplicaDirectoryNames(node *longhorn.Node) map[string]map[string]string {
+func (m *NodeMonitor) collectOnDiskReplicaDirectoryNames(node *longhorn.Node) map[string]map[string]string {
 	result := make(map[string]map[string]string, 0)
 
 	for diskName, disk := range node.Spec.Disks {
@@ -288,36 +234,13 @@ func (m *NodeMonitor) prunePossibleReplicaDirectoryNames(node *longhorn.Node, di
 	return replicaDirectoryNames, nil
 }
 
-func (m *NodeMonitor) getDiskStatMap(node *longhorn.Node) map[string]*DiskStat {
-	result := map[string]*DiskStat{}
+func (m *NodeMonitor) updateCollectedData(healthyDiskInfo map[string]map[string]*DiskInfo, failedDiskInfo map[string]*DiskInfo, onDiskReplicaDirectoryNames map[string]map[string]string) {
+	m.collectedDataLock.Lock()
+	defer m.collectedDataLock.Unlock()
 
-	for id, disk := range node.Spec.Disks {
-		info, err := m.getDiskStatHandler(disk.Path)
-		result[id] = &DiskStat{
-			Entry: info,
-			err:   err,
-		}
-	}
-	return result
-}
-
-// Check all disks in the same filesystem ID are in ready status
-func (m *NodeMonitor) isFSIDDuplicatedWithExistingReadyDisk(name string, disks []string, diskStatusMap map[string]*longhorn.DiskStatus) bool {
-	if len(disks) > 1 {
-		for _, otherName := range disks {
-			diskReady :=
-				types.GetCondition(
-					diskStatusMap[otherName].Conditions,
-					longhorn.DiskConditionTypeReady)
-
-			if (otherName != name) && (diskReady.Status ==
-				longhorn.ConditionStatusTrue) {
-				return true
-			}
-		}
-	}
-
-	return false
+	m.collectedData.HealthyDiskInfo = healthyDiskInfo
+	m.collectedData.FailedDiskInfo = failedDiskInfo
+	m.collectedData.OnDiskReplicaDirectoryNames = onDiskReplicaDirectoryNames
 }
 
 func isVolumeMetaFileExist(diskPath, replicaDirectoryName string) error {
@@ -326,63 +249,13 @@ func isVolumeMetaFileExist(diskPath, replicaDirectoryName string) error {
 	return err
 }
 
-func pruneDiskStatus(node *longhorn.Node) {
-	if node.Status.DiskStatus == nil {
-		node.Status.DiskStatus = map[string]*longhorn.DiskStatus{}
+func newDiskInfoForFailedDisk(message string) *DiskInfo {
+	return &DiskInfo{
+		Condition: &longhorn.Condition{
+			Type:    longhorn.DiskConditionTypeReady,
+			Status:  longhorn.ConditionStatusFalse,
+			Reason:  string(longhorn.DiskConditionReasonNoDiskInfo),
+			Message: message,
+		},
 	}
-
-	// Align node.Spec.Disks and node.Status.DiskStatus.
-	for id := range node.Spec.Disks {
-		if node.Status.DiskStatus[id] == nil {
-			node.Status.DiskStatus[id] = &longhorn.DiskStatus{}
-		}
-		diskStatus := node.Status.DiskStatus[id]
-		if diskStatus.Conditions == nil {
-			diskStatus.Conditions = []longhorn.Condition{}
-		}
-		if diskStatus.ScheduledReplica == nil {
-			diskStatus.ScheduledReplica = map[string]int64{}
-		}
-		// When condition are not ready, the old storage data should be cleaned.
-		diskStatus.StorageMaximum = 0
-		diskStatus.StorageAvailable = 0
-		node.Status.DiskStatus[id] = diskStatus
-	}
-
-	for id := range node.Status.DiskStatus {
-		if _, exists := node.Spec.Disks[id]; !exists {
-			delete(node.Status.DiskStatus, id)
-		}
-	}
-}
-
-func isDiskStatusChanged(oldDiskStatus, newDiskStatus map[string]*longhorn.DiskStatus) bool {
-	if len(oldDiskStatus) != len(newDiskStatus) {
-		return true
-	}
-
-	for id, oldStatus := range oldDiskStatus {
-		newStatus, ok := newDiskStatus[id]
-		if !ok {
-			return true
-		}
-		oldReadyCondition := types.GetCondition(oldStatus.Conditions, longhorn.DiskConditionTypeReady)
-		newReadyCondition := types.GetCondition(newStatus.Conditions, longhorn.DiskConditionTypeReady)
-		if !reflect.DeepEqual(&oldReadyCondition, &newReadyCondition) {
-			return true
-		}
-	}
-	return false
-}
-
-func copyDiskStatus(diskStatus map[string]*longhorn.DiskStatus) map[string]*longhorn.DiskStatus {
-	diskStatusCopy := make(map[string]*longhorn.DiskStatus, 0)
-
-	for name, status := range diskStatus {
-		statusCopy := &longhorn.DiskStatus{}
-		status.DeepCopyInto(statusCopy)
-		diskStatusCopy[name] = statusCopy
-	}
-
-	return diskStatusCopy
 }
