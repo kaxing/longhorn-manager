@@ -1841,8 +1841,8 @@ func (s *DataStore) GetReadyDiskNode(diskUUID string) (*longhorn.Node, string, e
 	return nil, "", fmt.Errorf("cannot find the corresponding ready node and disk with disk UUID %v", diskUUID)
 }
 
-// GetDisk find disk name by the given nodeName and diskUUD
-// Returns the disk name
+// GetReadyDisk find disk name by the given nodeName and diskUUD
+// Returns a disk name
 func (s *DataStore) GetReadyDisk(nodeName string, diskUUID string) (string, error) {
 	node, err := s.GetNode(nodeName)
 	if err != nil {

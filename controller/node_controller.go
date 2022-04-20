@@ -549,41 +549,180 @@ func (nc *NodeController) enqueueKubernetesNode(obj interface{}) {
 }
 
 func (nc *NodeController) syncDiskStatus(node *longhorn.Node, collectedData *monitor.NodeMonitorCollectedData) error {
-	diskStatMap := collectedData.DiskStatMap
-	diskStatusMap := collectedData.DiskStatusMap
+	healthyDiskInfoMap := collectedData.HealthyDiskInfo
+	failedDiskInfoMap := collectedData.FailedDiskInfo
 
-	pruneDiskStatus(node)
+	alignDiskSpecAndStatus(node)
 
-	// Update ready condition
-	for id, status := range diskStatusMap {
-		if node.Status.DiskStatus[id] == nil {
-			node.Status.DiskStatus[id] = &longhorn.DiskStatus{}
+	//diskStatusMap := node.Status.DiskStatus
+
+	nc.updateFailedDiskReadyCondition(node, failedDiskInfoMap)
+	nc.updateHealthyDiskReadyCondition(node, healthyDiskInfoMap)
+
+	/*
+		for fsid, diskInfoMap := range healthyDiskInfoMap {
+			for diskName, info := range diskInfoMap {
+				diskStatus := diskStatusMap[diskName]
+				diskUUID := info.DiskUUID
+
+				if diskStatusMap[diskName].DiskUUID == "" {
+					// Check disks in the same filesystem
+					if nc.isFSIDDuplicatedWithExistingReadyDisk(diskName, diskInfoMap, diskStatusMap) {
+						// Found multiple disks in the same Fsid
+						duplicatedDisks := getDuplicatedDisks(diskInfoMap)
+						diskStatusMap[diskName].Conditions =
+							types.SetConditionAndRecord(
+								diskStatusMap[diskName].Conditions,
+								longhorn.DiskConditionTypeReady,
+								longhorn.ConditionStatusFalse,
+								string(longhorn.DiskConditionReasonDiskFilesystemChanged),
+								fmt.Sprintf("Disk %v(%v) on node %v is not ready: disk has same file system ID %v as other disks %+v",
+									diskName, diskInfoMap[diskName].Path, node.Name, fsid, duplicatedDisks),
+								nc.eventRecorder, node, v1.EventTypeWarning)
+						continue
+					}
+
+					diskStatus.DiskUUID = diskUUID
+				} else { // diskStatusMap[id].DiskUUID != ""
+					if diskUUID == "" {
+						diskStatusMap[diskName].Conditions = types.SetConditionAndRecord(diskStatusMap[diskName].Conditions,
+							longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+							string(longhorn.DiskConditionReasonDiskFilesystemChanged),
+							fmt.Sprintf("Disk %v(%v) on node %v is not ready: cannot find disk config file, maybe due to a mount error",
+								diskName, diskInfoMap[diskName].Path, node.Name),
+							nc.eventRecorder, node, v1.EventTypeWarning)
+					} else if diskStatusMap[diskName].DiskUUID != diskUUID {
+						diskStatusMap[diskName].Conditions = types.SetConditionAndRecord(diskStatusMap[diskName].Conditions,
+							longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+							string(longhorn.DiskConditionReasonDiskFilesystemChanged),
+							fmt.Sprintf("Disk %v(%v) on node %v is not ready: record diskUUID doesn't match the one on the disk ",
+								diskName, diskInfoMap[diskName].Path, node.Name),
+							nc.eventRecorder, node, v1.EventTypeWarning)
+					}
+				}
+
+				if diskStatus.DiskUUID == diskUUID {
+					// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
+					// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
+					const truncateTo = 100 * 1024 * 1024
+					usableStorage := (diskInfoMap[diskName].DiskStat.StorageAvailable / truncateTo) * truncateTo
+					diskStatus.StorageAvailable = usableStorage
+					diskStatus.StorageMaximum = diskInfoMap[diskName].DiskStat.StorageMaximum
+					diskStatusMap[diskName].Conditions = types.SetConditionAndRecord(diskStatusMap[diskName].Conditions,
+						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusTrue,
+						"", fmt.Sprintf("Disk %v(%v) on node %v is ready", diskName, diskInfoMap[diskName].Path, node.Name),
+						nc.eventRecorder, node, v1.EventTypeNormal)
+				}
+				diskStatusMap[diskName] = diskStatus
+
+				if diskStatus.DiskUUID == diskUUID {
+					// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
+					// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
+					const truncateTo = 100 * 1024 * 1024
+					usableStorage := (diskInfoMap[diskName].DiskStat.StorageAvailable / truncateTo) * truncateTo
+					node.Status.DiskStatus[diskName].StorageAvailable = usableStorage
+					node.Status.DiskStatus[diskName].StorageMaximum = diskInfoMap[diskName].DiskStat.StorageMaximum
+					diskStatusMap[diskName].Conditions = types.SetConditionAndRecord(diskStatusMap[diskName].Conditions,
+						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusTrue,
+						"", fmt.Sprintf("Disk %v(%v) on node %v is ready", diskName, diskInfoMap[diskName].Path, node.Name),
+						nc.eventRecorder, node, v1.EventTypeNormal)
+				}
+				diskStatusMap[diskName] = diskStatus
+			}
 		}
-
-		node.Status.DiskStatus[id].DiskUUID = status.DiskUUID
-
-		condition := types.GetCondition(status.Conditions, longhorn.DiskConditionTypeReady)
-		if condition.Status == longhorn.ConditionStatusTrue {
-			// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
-			// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
-			const truncateTo = 100 * 1024 * 1024
-
-			usableStorage := (diskStatMap[id].Entry.StorageAvailable / truncateTo) * truncateTo
-			node.Status.DiskStatus[id].StorageAvailable = usableStorage
-			node.Status.DiskStatus[id].StorageMaximum = diskStatMap[id].Entry.StorageMaximum
-		}
-
-		eventType := v1.EventTypeNormal
-		if condition.Status == longhorn.ConditionStatusFalse {
-			eventType = v1.EventTypeWarning
-		}
-
-		node.Status.DiskStatus[id].Conditions = types.SetConditionAndRecord(node.Status.DiskStatus[id].Conditions,
-			condition.Type, condition.Status, condition.Reason, condition.Message,
-			nc.eventRecorder, node, eventType)
-	}
-
+	*/
 	return nc.updateDiskStatusSchedulableCondition(node)
+}
+
+func (nc *NodeController) updateFailedDiskReadyCondition(node *longhorn.Node, failedDiskInfoMap map[string]*monitor.DiskInfo) {
+	for diskName, diskInfoMap := range failedDiskInfoMap {
+		if diskInfoMap.Condition != nil {
+			node.Status.DiskStatus[diskName].Conditions =
+				types.SetConditionAndRecord(node.Status.DiskStatus[diskName].Conditions,
+					diskInfoMap.Condition.Type,
+					diskInfoMap.Condition.Status,
+					diskInfoMap.Condition.Reason,
+					diskInfoMap.Condition.Message,
+					nc.eventRecorder,
+					node,
+					v1.EventTypeWarning)
+		}
+	}
+}
+
+func (nc *NodeController) updateHealthyDiskReadyCondition(node *longhorn.Node, healthyDiskInfoMap map[string]map[string]*monitor.DiskInfo) {
+	diskStatusMap := node.Status.DiskStatus
+
+	for fsid, diskInfoMap := range healthyDiskInfoMap {
+		for diskName, info := range diskInfoMap {
+			diskStatus := diskStatusMap[diskName]
+			diskUUID := info.DiskUUID
+
+			if diskStatusMap[diskName].DiskUUID == "" {
+				// Check disks in the same filesystem
+				if nc.isFSIDDuplicatedWithExistingReadyDisk(diskName, diskInfoMap, diskStatusMap) {
+					// Found multiple disks in the same Fsid
+					duplicatedDisks := getDuplicatedDisks(diskInfoMap)
+					diskStatusMap[diskName].Conditions =
+						types.SetConditionAndRecord(
+							diskStatusMap[diskName].Conditions,
+							longhorn.DiskConditionTypeReady,
+							longhorn.ConditionStatusFalse,
+							string(longhorn.DiskConditionReasonDiskFilesystemChanged),
+							fmt.Sprintf("Disk %v(%v) on node %v is not ready: disk has same file system ID %v as other disks %+v",
+								diskName, diskInfoMap[diskName].Path, node.Name, fsid, duplicatedDisks),
+							nc.eventRecorder, node, v1.EventTypeWarning)
+					continue
+				}
+
+				diskStatus.DiskUUID = diskUUID
+			} else { // diskStatusMap[id].DiskUUID != ""
+				if diskUUID == "" {
+					diskStatusMap[diskName].Conditions = types.SetConditionAndRecord(diskStatusMap[diskName].Conditions,
+						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
+						fmt.Sprintf("Disk %v(%v) on node %v is not ready: cannot find disk config file, maybe due to a mount error",
+							diskName, diskInfoMap[diskName].Path, node.Name),
+						nc.eventRecorder, node, v1.EventTypeWarning)
+				} else if diskStatusMap[diskName].DiskUUID != diskUUID {
+					diskStatusMap[diskName].Conditions = types.SetConditionAndRecord(diskStatusMap[diskName].Conditions,
+						longhorn.DiskConditionTypeReady, longhorn.ConditionStatusFalse,
+						string(longhorn.DiskConditionReasonDiskFilesystemChanged),
+						fmt.Sprintf("Disk %v(%v) on node %v is not ready: record diskUUID doesn't match the one on the disk ",
+							diskName, diskInfoMap[diskName].Path, node.Name),
+						nc.eventRecorder, node, v1.EventTypeWarning)
+				}
+			}
+
+			if diskStatus.DiskUUID == diskUUID {
+				// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
+				// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
+				const truncateTo = 100 * 1024 * 1024
+				usableStorage := (diskInfoMap[diskName].DiskStat.StorageAvailable / truncateTo) * truncateTo
+				diskStatus.StorageAvailable = usableStorage
+				diskStatus.StorageMaximum = diskInfoMap[diskName].DiskStat.StorageMaximum
+				diskStatusMap[diskName].Conditions = types.SetConditionAndRecord(diskStatusMap[diskName].Conditions,
+					longhorn.DiskConditionTypeReady, longhorn.ConditionStatusTrue,
+					"", fmt.Sprintf("Disk %v(%v) on node %v is ready", diskName, diskInfoMap[diskName].Path, node.Name),
+					nc.eventRecorder, node, v1.EventTypeNormal)
+			}
+			diskStatusMap[diskName] = diskStatus
+
+			if diskStatus.DiskUUID == diskUUID {
+				// on the default disks this will be updated constantly since there is always something generating new disk usage (logs, etc)
+				// We also don't need byte/block precisions for this instead we can round down to the next 10/100mb
+				const truncateTo = 100 * 1024 * 1024
+				usableStorage := (diskInfoMap[diskName].DiskStat.StorageAvailable / truncateTo) * truncateTo
+				node.Status.DiskStatus[diskName].StorageAvailable = usableStorage
+				node.Status.DiskStatus[diskName].StorageMaximum = diskInfoMap[diskName].DiskStat.StorageMaximum
+				diskStatusMap[diskName].Conditions = types.SetConditionAndRecord(diskStatusMap[diskName].Conditions,
+					longhorn.DiskConditionTypeReady, longhorn.ConditionStatusTrue,
+					"", fmt.Sprintf("Disk %v(%v) on node %v is ready", diskName, diskInfoMap[diskName].Path, node.Name),
+					nc.eventRecorder, node, v1.EventTypeNormal)
+			}
+			diskStatusMap[diskName] = diskStatus
+		}
+	}
 }
 
 func (nc *NodeController) updateDiskStatusSchedulableCondition(node *longhorn.Node) error {
@@ -1052,27 +1191,34 @@ func (nc *NodeController) syncWithMonitor(mon monitor.Monitor, node *longhorn.No
 	}
 
 	collectedData := v.(*monitor.NodeMonitorCollectedData)
-	if isDiskConflict(node, collectedData.DiskStatusMap) {
-		return nil, errors.New("conflict disk status")
+	if isDiskConflict(node, collectedData) {
+		return nil, errors.New("conflict disks")
 	}
 	return collectedData, nil
 }
 
-func isDiskConflict(node *longhorn.Node, diskStatus map[string]*longhorn.DiskStatus) bool {
-	if len(node.Spec.Disks) != len(diskStatus) {
-		return true
-	}
-
-	for id := range node.Spec.Disks {
-		if _, ok := diskStatus[id]; !ok {
+func isDiskConflict(node *longhorn.Node, collectedData *monitor.NodeMonitorCollectedData) bool {
+	diskCount := len(collectedData.FailedDiskInfo)
+	for diskName := range collectedData.FailedDiskInfo {
+		if _, ok := node.Spec.Disks[diskName]; !ok {
 			return true
 		}
 	}
 
-	return false
+	for _, diskInfo := range collectedData.HealthyDiskInfo {
+		diskCount += len(diskInfo)
+
+		for diskName := range diskInfo {
+			if _, ok := node.Spec.Disks[diskName]; !ok {
+				return true
+			}
+		}
+	}
+
+	return len(node.Spec.Disks) != diskCount
 }
 
-func pruneDiskStatus(node *longhorn.Node) {
+func alignDiskSpecAndStatus(node *longhorn.Node) {
 	if node.Status.DiskStatus == nil {
 		node.Status.DiskStatus = map[string]*longhorn.DiskStatus{}
 	}
@@ -1099,4 +1245,27 @@ func pruneDiskStatus(node *longhorn.Node) {
 			delete(node.Status.DiskStatus, id)
 		}
 	}
+}
+
+// Check all disks in the same filesystem ID are in ready status
+func (nc *NodeController) isFSIDDuplicatedWithExistingReadyDisk(diskName string, diskInfo map[string]*monitor.DiskInfo, diskStatusMap map[string]*longhorn.DiskStatus) bool {
+	if len(diskInfo) > 1 {
+		for otherName := range diskInfo {
+			diskReady := types.GetCondition(diskStatusMap[otherName].Conditions, longhorn.DiskConditionTypeReady)
+
+			if otherName != diskName && diskReady.Status == longhorn.ConditionStatusTrue {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func getDuplicatedDisks(diskInfoMap map[string]*monitor.DiskInfo) []string {
+	disks := []string{}
+	for diskName := range diskInfoMap {
+		disks = append(disks, diskName)
+	}
+	return disks
 }
