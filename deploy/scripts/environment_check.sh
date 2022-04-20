@@ -71,9 +71,9 @@ detect_node_os()
 {
   local pod="$1"
 
-  OS=`kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "echo $(grep -E "^ID_LIKE=" /etc/os-release | cut -d '=' -f 2)"`
+  OS=`kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c 'grep -E "^ID_LIKE=" /etc/os-release | cut -d '=' -f 2'`
   if [[ -z "${OS}" ]]; then
-    OS=`kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "echo $(grep -E "^ID=" /etc/os-release | cut -d '=' -f 2)"`
+    OS=`kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c 'grep -E "^ID=" /etc/os-release | cut -d '=' -f 2'`
   fi
   echo "$OS"
 }
@@ -82,19 +82,19 @@ set_packages_and_check_cmd()
 {
   case $OS in
   *"debian"* | *"ubuntu"* )
-    CHECK_CMD="dpkg-query -l"
+    CHECK_CMD='dpkg -l|grep'
     PACKAGES=(nfs-common open-iscsi)
     ;;
   *"centos"* | *"fedora"* | *"rocky"* | *"ol"* )
-    CHECK_CMD="rpm -q"
+    CHECK_CMD='rpm -q'
     PACKAGES=(nfs-utils iscsi-initiator-utils)
     ;;
   *"suse"* )
-    CHECK_CMD="zypper se -i"
+    CHECK_CMD='zypper se -i'
     PACKAGES=(nfs-client open-iscsi)
     ;;
   *)
-    CHECK_CMD=""
+    CHECK_CMD=''
     PACKAGES=()
     warn "Stop the environment check because '$OS' is not supported in the environment check script."
     exit 1
@@ -223,7 +223,6 @@ check_package_installed() {
 
     for ((i=0; i<${#PACKAGES[@]}; i++)); do
       local package=${PACKAGES[$i]}
-
       kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "$CHECK_CMD $package" > /dev/null 2>&1
       if [ $? != 0 ]; then
         allFound=false
@@ -292,4 +291,3 @@ check_multipathd
 check_mount_propagation
 
 exit 0
-
