@@ -67,14 +67,41 @@ error() {
   fi
 }
 
-detect_os()
+detect_node_os()
 {
-  OS=`grep -E "^ID_LIKE=" /etc/os-release | cut -d '=' -f 2`
+  local pod="$1"
+
+  OS=`kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "echo $(grep -E "^ID_LIKE=" /etc/os-release | cut -d '=' -f 2)"`
   if [[ -z "${OS}" ]]; then
-    OS=$(grep -E "^ID=" /etc/os-release | cut -d '=' -f 2)
+    OS=`kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "echo $(grep -E "^ID=" /etc/os-release | cut -d '=' -f 2)"`
   fi
   echo "$OS"
 }
+
+set_packages_and_check_cmd()
+{
+  case $OS in
+  *"debian"* | *"ubuntu"* )
+    CHECK_CMD="dpkg-query -l"
+    PACKAGES=(nfs-common open-iscsi)
+    ;;
+  *"centos"* | *"fedora"* | *"rocky"* | *"ol"* )
+    CHECK_CMD="rpm -q"
+    PACKAGES=(nfs-utils iscsi-initiator-utils)
+    ;;
+  *"suse"* )
+    CHECK_CMD="zypper se -i"
+    PACKAGES=(nfs-client open-iscsi)
+    ;;
+  *)
+    CHECK_CMD=""
+    PACKAGES=()
+    warn "Stop the environment check because '$OS' is not supported in the environment check script."
+    exit 1
+    ;;
+   esac
+}
+
 
 check_dependencies() {
   local targets=($@)
@@ -181,16 +208,23 @@ check_mount_propagation() {
 }
 
 check_package_installed() {
-  local packages=($@)
   local pods=$(kubectl get pods -o name | grep longhorn-environment-check)
 
   local allFound=true
 
-  for ((i=0; i<${#packages[@]}; i++)); do
-    local package=${packages[$i]}
+  for pod in ${pods}; do
+    OS=`detect_node_os $pod`
+    if [ x"$OS" == x"" ]; then
+      error "Unable to detect OS in $node."
+      exit 2
+    fi
 
-    for pod in ${pods}; do
-      kubectl exec -it $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "$CHECK_CMD $package" > /dev/null 2>&1
+    set_packages_and_check_cmd $OS
+
+    for ((i=0; i<${#PACKAGES[@]}; i++)); do
+      local package=${PACKAGES[$i]}
+
+      kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "$CHECK_CMD $package" > /dev/null 2>&1
       if [ $? != 0 ]; then
         allFound=false
         node=`kubectl get ${pod} --no-headers -o=custom-columns=:.spec.nodeName`
@@ -212,7 +246,7 @@ check_multipathd() {
   local allNotFound=true
 
   for pod in ${pods}; do
-    kubectl exec -it $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "systemctl status --no-pager multipathd.service" > /dev/null 2>&1
+    kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "systemctl status --no-pager multipathd.service" > /dev/null 2>&1
     if [ $? = 0 ]; then
       allNotFound=false
       node=`kubectl get ${pod} --no-headers -o=custom-columns=:.spec.nodeName`
@@ -230,7 +264,8 @@ check_iscsid() {
   local allFound=true
 
   for pod in ${pods}; do
-    kubectl exec -it $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "systemctl status --no-pager iscsid.service" > /dev/null 2>&1
+    kubectl exec -t $pod -- nsenter --mount=/proc/1/ns/mnt -- bash -c "systemctl status --no-pager iscsid.service" > /dev/null 2>&1
+
     if [ $? != 0 ]; then
       allFound=false
       node=`kubectl get ${pod} --no-headers -o=custom-columns=:.spec.nodeName`
@@ -243,34 +278,7 @@ check_iscsid() {
   fi
 }
 
-OS=`detect_os`
-if [ x"$OS" == x"" ]; then
-  error "Unable to detect OS."
-  exit 2
-fi
-
 DEPENDENCIES=(kubectl jq mktemp)
-
-case $OS in
-*"debian"* | *"ubuntu"* )
-  CHECK_CMD="dpkg-query -l"
-  PACKAGES=(nfs-common open-iscsi)
-  ;;
-*"centos"* | *"fedora"* | *"rocky"* | *"ol"* )
-  CHECK_CMD="rpm -q"
-  PACKAGES=(nfs-utils iscsi-initiator-utils)
-  ;;
-*"suse"* )
-  CHECK_CMD="zypper se -i"
-  PACKAGES=(nfs-client open-iscsi)
-  ;;
-*)
-  warn "Stop the environment check because '$OS' is not supported in the environment check script."
-  exit 1
-  ;;
-esac
-
-
 check_dependencies ${DEPENDENCIES[@]}
 
 TEMP_DIR=$(mktemp -d)
@@ -278,8 +286,7 @@ TEMP_DIR=$(mktemp -d)
 trap cleanup EXIT
 create_ds
 wait_ds_ready
-
-check_package_installed ${PACKAGES[@]}
+check_package_installed
 check_iscsid
 check_multipathd
 check_mount_propagation
